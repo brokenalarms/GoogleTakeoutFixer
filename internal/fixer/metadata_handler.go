@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// Struct to hold the structure of the JSON metadata
 type imageMetadata struct {
 	Title          string `json:"title"`
 	PhotoTakenTime struct {
@@ -16,6 +17,7 @@ type imageMetadata struct {
 	} `json:"photoTakenTime"`
 }
 
+// Reads JSON and returns some of its metadata contents using the imageMetadata struct
 func ReadJsonMetadata(jsonPath string) (imageMetadata, error) {
 	var data imageMetadata
 
@@ -34,6 +36,7 @@ func ReadJsonMetadata(jsonPath string) (imageMetadata, error) {
 	return data, err
 }
 
+// Apply a timestamp to a file
 func ApplyFileTime(filePath string, meta imageMetadata) error {
 	timestampInt, err := strconv.ParseInt(meta.PhotoTakenTime.Timestamp, 10, 64)
 	if err != nil {
