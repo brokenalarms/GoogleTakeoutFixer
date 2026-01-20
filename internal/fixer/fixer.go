@@ -71,7 +71,7 @@ func DuplicateAndFixImage(filePath string, outputPath string, metdataExtension s
 	}
 
 	jsonPath := filePath + metdataExtension
-	meta, err := ReadMetadata(jsonPath)
+	meta, err := ReadJsonMetadata(jsonPath)
 	if err != nil {
 		fmt.Printf("Error reading metadata(%s): %v\n", jsonPath, err)
 		return

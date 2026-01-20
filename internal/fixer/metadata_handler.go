@@ -16,7 +16,7 @@ type imageMetadata struct {
 	} `json:"photoTakenTime"`
 }
 
-func ReadMetadata(jsonPath string) (imageMetadata, error) {
+func ReadJsonMetadata(jsonPath string) (imageMetadata, error) {
 	var data imageMetadata
 
 	jsonFile, err := os.Open(jsonPath)
