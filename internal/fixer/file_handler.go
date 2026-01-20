@@ -9,6 +9,7 @@ import (
 	"strings"
 )
 
+// Read the contents of a directory and returns a slice containing the directory entries
 func ReadDirectory(path string) []os.DirEntry {
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -18,6 +19,7 @@ func ReadDirectory(path string) []os.DirEntry {
 	return entries
 }
 
+// Copies a file from a source path to a destination path
 func DuplicateFile(source string, destination string) error {
 	sourceFile, err := os.Open(source)
 	if err != nil {
@@ -35,6 +37,7 @@ func DuplicateFile(source string, destination string) error {
 	return err
 }
 
+// Separates year folders from album folders based on its naming
 func FindYearAlbumFolders(albums []os.DirEntry) ([]os.DirEntry, []os.DirEntry) {
 	// todo: add language support
 	re := regexp.MustCompile(`^Photos from \d+$`)
@@ -56,6 +59,7 @@ func FindYearAlbumFolders(albums []os.DirEntry) ([]os.DirEntry, []os.DirEntry) {
 	return yearFolders, albumFolders
 }
 
+// Returns a list of directories within the given path
 func FindDirs(path string) []os.DirEntry {
 	var dirlist []os.DirEntry
 
@@ -75,12 +79,14 @@ func FindDirs(path string) []os.DirEntry {
 	return dirlist
 }
 
+// Checks if a sidecar file with the given suffix exists for the original file
 func HasSidecarFile(originalPath string, suffix string) bool {
 	sidecarPath := originalPath + suffix
 	_, err := os.Stat(sidecarPath)
 	return err == nil
 }
 
+// Checks if the file at the given path has the specified extension
 func IsNameExtension(extension string, path string) bool {
 	return strings.EqualFold(filepath.Ext(path), extension)
 }
