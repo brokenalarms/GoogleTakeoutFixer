@@ -1,13 +1,10 @@
 package fixer
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 )
 
 func Process(sourcePath string, outputPath string) error {
@@ -42,16 +39,6 @@ func Process(sourcePath string, outputPath string) error {
 	}
 
 	return nil
-}
-
-func CheckWhetherYear(dirPath string) (bool, error) {
-	re := regexp.MustCompile(`^Photos from \d+$`)
-
-	if re.MatchString(dirPath) {
-		return true, nil
-	} else {
-		return false, nil
-	}
 }
 
 func ProcessDirectory(dirPath string, outputPath string) error {
@@ -91,7 +78,7 @@ func ProcessFile(sourcePath string, outputPath string) error {
 
 	fmt.Println(sidecarPath)
 
-	meta, err := ReadJsonMeta(sidecarPath)
+	meta, err := ReadJsonMetadata(sidecarPath)
 	if err != nil {
 		fmt.Println("error reading metadata: ", err)
 	}
@@ -117,7 +104,7 @@ func CreateFixedFile(filePath string, fileMetadataPath string, outputPath string
 		return err
 	}
 
-	metadata, err := ReadJsonMeta(fileMetadataPath)
+	metadata, err := ReadJsonMetadata(fileMetadataPath)
 	if err != nil {
 		return err
 	}
@@ -127,76 +114,12 @@ func CreateFixedFile(filePath string, fileMetadataPath string, outputPath string
 	return nil
 }
 
-func CopyFile(inputPath string, outputPath string) error {
-	sourceFile, err := os.Open(inputPath)
-	if err != nil {
-		return err
+func CheckWhetherYear(dirPath string) (bool, error) {
+	re := regexp.MustCompile(`^Photos from \d+$`)
+
+	if re.MatchString(dirPath) {
+		return true, nil
+	} else {
+		return false, nil
 	}
-	defer sourceFile.Close()
-
-	destFile, err := os.Create(outputPath)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, sourceFile)
-	return err
-}
-
-func ReadJsonMeta(jsonPath string) (imageMetadata, error) {
-	var data imageMetadata
-
-	jsonFile, err := os.Open(jsonPath)
-	if err != nil {
-		return data, err
-	}
-	defer jsonFile.Close()
-
-	byteValue, err := io.ReadAll(jsonFile)
-	if err != nil {
-		return data, err
-	}
-
-	err = json.Unmarshal(byteValue, &data)
-	return data, err
-}
-
-func DiscoverDirs(path string) ([]os.DirEntry, error) {
-	var dirList []os.DirEntry
-
-	files, err := os.ReadDir(path)
-
-	if err != nil {
-		return nil, err
-	}
-
-	for _, file := range files {
-		if file.IsDir() {
-			dirList = append(dirList, file)
-		}
-	}
-
-	return dirList, nil
-}
-
-var sidecarSuffixes = []string{
-	".supplemental-m.json",
-	".supplemental-metadata.json",
-	".supplemental-metada.json",
-}
-
-func FindSidecar(imagePath string) string {
-	for _, suffix := range sidecarSuffixes {
-		p := imagePath + suffix
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
-}
-
-// Checks if the file at the given path has the specified extension
-func IsNameExtension(extension string, path string) bool {
-	return strings.EqualFold(filepath.Ext(path), extension)
 }
