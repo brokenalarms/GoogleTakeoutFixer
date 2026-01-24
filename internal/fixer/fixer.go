@@ -5,20 +5,58 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
+
+type Progress struct {
+	Total     int
+	Processed int
+	Current   string
+}
 
 // Process is the main fixer entry point.
 // Process
 // -> DiscoverDirs
 // --> ProcessDirectory
 // ---> ProcessFile
-func Process(sourcePath string, outputPath string) error {
+
+func CountImagesRecursive(path string) (int, error) {
+	count := 0
+
+	err := filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		extension := strings.ToLower(filepath.Ext(d.Name()))
+		if extension == ".jpg" || extension == ".jpeg" || extension == ".png" {
+			count++
+		}
+		return nil
+	})
+
+	return count, err
+}
+
+func Process(
+	sourcePath string,
+	outputPath string,
+	progressCh chan<- Progress,
+) error {
+	defer close(progressCh)
+	p := Progress{}
+
+	amountImages, err := CountImagesRecursive(sourcePath)
+	p.Total = amountImages
+	progressCh <- p
+
 	dirs, err := DiscoverDirs(sourcePath)
 	if err != nil {
 		fmt.Println("error discovering: ", err)
 	}
-
-	fmt.Println(dirs)
 
 	err = ProcessFile(sourcePath, outputPath)
 	if err != nil {
@@ -27,27 +65,23 @@ func Process(sourcePath string, outputPath string) error {
 
 	for _, dir := range dirs {
 
-		dirPath := string(sourcePath) + /*string(os.PathSeparator) + */ dir.Name()
-		fmt.Println(dirPath)
+		dirPath := string(sourcePath) + dir.Name()
 
 		var targetPath string = outputPath + dir.Name()
 
-		ProcessDirectory(dirPath, targetPath)
-
-		isYear, err := CheckWhetherYear(dir.Name())
-
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		fmt.Println(dir.Name(), ":", isYear)
+		ProcessDirectory(dirPath, targetPath, &p, progressCh)
 	}
 
 	return nil
 }
 
 // Process a directory and fix all files within the directory. Ignores sub-directories.
-func ProcessDirectory(dirPath string, outputPath string) error {
+func ProcessDirectory(
+	dirPath string,
+	outputPath string,
+	p *Progress,
+	progressCh chan<- Progress,
+) error {
 	files, err := os.ReadDir(dirPath)
 	if err != nil {
 		return err
@@ -63,14 +97,17 @@ func ProcessDirectory(dirPath string, outputPath string) error {
 
 		// Check whether a file is an image or not
 		// TODO: Add support for any image/video file without hard coding
+		// TODO: This check also happens within CountImagesRecursively, turn this into a function
 		if !IsNameExtension(".jpg", imagePath) && !IsNameExtension(".png", imagePath) {
 			continue
 		}
 
 		ProcessFile(imagePath, outputPath)
 
+		p.Processed++
+		p.Current = imagePath
+		progressCh <- *p
 	}
-
 	return nil
 }
 
@@ -83,17 +120,12 @@ func ProcessFile(sourcePath string, outputPath string) error {
 		return nil
 	}
 
-	fmt.Println(sidecarPath)
-
-	meta, err := ReadJsonMetadata(sidecarPath)
+	_, err := ReadJsonMetadata(sidecarPath)
 	if err != nil {
 		fmt.Println("error reading metadata: ", err)
 	}
 
 	CreateFixedFile(sourcePath, sidecarPath, outputPath)
-	fmt.Println(sourcePath, sidecarPath, outputPath)
-
-	fmt.Println(meta.PhotoTakenTime)
 
 	return nil
 }

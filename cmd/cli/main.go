@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/feloex/GoogleTakeoutFixer/internal/fixer"
 )
@@ -16,12 +17,27 @@ func main() {
 	inputPath := os.Args[1]
 	outputPath := os.Args[2]
 
-	/*
-		useLinks := false
-		if len(os.Args) >= 4 {
-			useLinks = strings.Contains(strings.ToLower(os.Args[3]), "link")
-		}*/
+	progressCh := make(chan fixer.Progress)
 
-	//fixer.ProcessTakeout(inputPath, outputPath /*useLinks*/)
-	fixer.Process(inputPath, outputPath)
+	go func() {
+		if err := fixer.Process(inputPath, outputPath, progressCh); err != nil {
+			fmt.Println("error:", err)
+		}
+	}()
+
+	// Recieve progress event
+	for p := range progressCh {
+		if p.Processed == 0 {
+			continue
+		}
+
+		fmt.Println(
+			p.Processed,
+			"/",
+			p.Total,
+			filepath.Base(p.Current),
+		)
+	}
+
+	fmt.Println("\nDone")
 }
