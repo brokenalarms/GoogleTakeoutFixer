@@ -108,7 +108,7 @@ func CreateFixedFile(filePath string, fileMetadataPath string, outputPath string
 	fileName := filepath.Base(filePath)
 	destPath := filepath.Join(outputPath, fileName)
 
-	if err := CopyFile(filePath, destPath); err != nil {
+	if err := DudplicateFile(filePath, destPath); err != nil {
 		return err
 	}
 
