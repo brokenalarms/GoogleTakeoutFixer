@@ -9,12 +9,19 @@ import (
 
 func main() {
 	if len(os.Args) < 3 {
-		fmt.Println("Flags missing! Enter InputPath (path of your takeout) and OutputPath (where your fixed files will be located).")
+		fmt.Println("Flags missing! Enter InputPath and OutputPath.")
 		return
 	}
 
-	var InputPath = os.Args[1]
-	var OutputPath = os.Args[2]
+	inputPath := os.Args[1]
+	outputPath := os.Args[2]
 
-	fixer.ProcessTakeout(InputPath, OutputPath)
+	/*
+		useLinks := false
+		if len(os.Args) >= 4 {
+			useLinks = strings.Contains(strings.ToLower(os.Args[3]), "link")
+		}*/
+
+	//fixer.ProcessTakeout(inputPath, outputPath /*useLinks*/)
+	fixer.Process(inputPath, outputPath)
 }

@@ -1,106 +1,196 @@
 package fixer
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
-func ProcessTakeout(inputPath string, outputPath string) {
-	var allFolders []os.DirEntry = FindDirs(inputPath)
-	var yearFolders, albumFolders = FindYearAlbumFolders(allFolders)
+func Process(sourcePath string, outputPath string) error {
+	dirs, err := DiscoverDirs(sourcePath)
+	if err != nil {
+		fmt.Println("error discovering: ", err)
+	}
 
-	CreateFixedImageFolder(inputPath, outputPath, yearFolders, albumFolders)
-}
+	fmt.Println(dirs)
 
-func CreateFixedImageFolder(baseInputPath string, outputFolder string, yearFolders []os.DirEntry, albumFolders []os.DirEntry) {
-	if err := os.Mkdir(outputFolder, os.ModePerm); err != nil {
+	err = ProcessFile(sourcePath, outputPath)
+	if err != nil {
 		fmt.Println(err)
 	}
 
-	fmt.Printf("%v %v\n", yearFolders, albumFolders)
-	fmt.Printf("Output folder: %v\n", outputFolder)
+	for _, dir := range dirs {
 
-	// Process year folders
-	for _, curYearDir := range yearFolders {
-		if !curYearDir.IsDir() {
-			fmt.Println("File in YearFolder is not a directory!  ", curYearDir.Name())
-			continue
+		dirPath := string(sourcePath) + /*string(os.PathSeparator) + */ dir.Name()
+		fmt.Println(dirPath)
+
+		ProcessDirectory(dirPath, outputPath)
+
+		isYear, err := CheckWhetherYear(dir.Name())
+
+		if err != nil {
+			fmt.Println(err)
 		}
 
-		yearPath := filepath.Join(baseInputPath, curYearDir.Name())
-		fmt.Printf("Reading year directory: %s\n", yearPath)
-
-		files := ReadDirectory(yearPath)
-		ProcessFiles(files, yearPath, outputFolder, curYearDir.Name())
+		fmt.Println(dir.Name(), ":", isYear)
 	}
 
-	// Process album folders
-	for _, curAlbumDir := range albumFolders {
-		if !curAlbumDir.IsDir() {
-			fmt.Println("File in AlbumFolder is not a directory!  ", curAlbumDir.Name())
-			continue
-		}
-
-		albumPath := filepath.Join(baseInputPath, curAlbumDir.Name())
-		fmt.Printf("Reading album directory: %s\n", albumPath)
-
-		files := ReadDirectory(albumPath)
-		ProcessFiles(files, albumPath, outputFolder, curAlbumDir.Name())
-	}
+	return nil
 }
 
-func ProcessFiles(files []os.DirEntry, basePath string, outputFolder string, curDir string) {
-	var FullNewFilePath = filepath.Join(outputFolder, curDir)
-	err := os.MkdirAll(FullNewFilePath, 0755)
-	if err != nil {
-		println("error while creating folder for ", curDir)
-	}
-	for _, entry := range files {
-		filePath := filepath.Join(basePath, entry.Name())
+func CheckWhetherYear(dirPath string) (bool, error) {
+	re := regexp.MustCompile(`^Photos from \d+$`)
 
-		if entry.IsDir() {
-			fmt.Printf("Found album sub-directory: %s\n", filePath)
-			continue
-		}
-
-		if IsNameExtension(".json", entry.Name()) {
-			continue
-		}
-
-		fmt.Printf("Found file: %s\n", filePath)
-		fmt.Println("File name:  ", entry.Name())
-
-		outputPath := filepath.Join(FullNewFilePath, entry.Name())
-
-		if HasSidecarFile(filePath, ".supplemental-m.json") {
-			DuplicateAndFixImage(filePath, outputPath, ".supplemental-m.json")
-		} else if HasSidecarFile(filePath, ".supplemental-metadata.json") {
-			DuplicateAndFixImage(filePath, outputPath, ".supplemental-metadata.json")
-		} else if HasSidecarFile(filePath, ".supplemental-metada.json") {
-			DuplicateAndFixImage(filePath, outputPath, ".supplemental-metada.json")
-		} else {
-			fmt.Println("no image metadata json found for " + filePath)
-		}
-	}
-}
-
-func DuplicateAndFixImage(filePath string, outputPath string, metdataExtension string) {
-	if err := DuplicateFile(filePath, outputPath); err != nil {
-		fmt.Printf("Error while duplicating: %v\n", err)
-		return
-	}
-
-	jsonPath := filePath + metdataExtension
-	meta, err := ReadJsonMetadata(jsonPath)
-	if err != nil {
-		fmt.Printf("Error reading metadata(%s): %v\n", jsonPath, err)
-		return
-	}
-
-	if err := ApplyFileTime(outputPath, meta); err != nil {
-		fmt.Printf("Error setting timestamp: %v\n", err)
+	if re.MatchString(dirPath) {
+		return true, nil
 	} else {
-		fmt.Printf("Image fixed: %s\n", outputPath)
+		return false, nil
 	}
+}
+
+func ProcessDirectory(dirPath string, outputPath string) error {
+	files, err := os.ReadDir(dirPath)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		imagePath := filepath.Join(dirPath, file.Name())
+
+		if file.IsDir() {
+			fmt.Println("file is a dir")
+			continue
+		}
+		//fmt.Println(imagePath)
+
+		// check whether file is a image file
+		if !IsNameExtension(".jpg", imagePath) && !IsNameExtension(".png", imagePath) {
+			continue
+		}
+
+		ProcessFile(imagePath, outputPath)
+
+	}
+
+	return nil
+}
+
+func ProcessFile(sourcePath string, outputPath string) error {
+	sidecarPath := FindSidecar(sourcePath)
+
+	// Metadata sidecar file not found
+	if sidecarPath == "" {
+		return nil
+	}
+
+	fmt.Println(sidecarPath)
+
+	meta, err := ReadJsonMeta(sidecarPath)
+	if err != nil {
+		fmt.Println("error reading metadata: ", err)
+	}
+
+	CreateFixedFile(sourcePath, sidecarPath, outputPath)
+	fmt.Println(sourcePath, sidecarPath, outputPath)
+
+	fmt.Println(meta.PhotoTakenTime)
+
+	return nil
+}
+
+func CreateFixedFile(filePath string, fileMetadataPath string, outputPath string) error {
+	fileName := filepath.Base(filePath)
+	destPath := filepath.Join(outputPath, fileName)
+
+	err := CopyFile(filePath, destPath)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	metadata, err := ReadJsonMeta(fileMetadataPath)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	ApplyFileTime(outputPath, metadata)
+
+	return nil
+}
+
+func CopyFile(inputPath string, outputPath string) error {
+	sourceFile, err := os.Open(inputPath)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(outputPath)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
+}
+
+func ReadJsonMeta(jsonPath string) (imageMetadata, error) {
+	var data imageMetadata
+
+	jsonFile, err := os.Open(jsonPath)
+	if err != nil {
+		return data, err
+	}
+	defer jsonFile.Close()
+
+	byteValue, err := io.ReadAll(jsonFile)
+	if err != nil {
+		return data, err
+	}
+
+	err = json.Unmarshal(byteValue, &data)
+	return data, err
+}
+
+func DiscoverDirs(path string) ([]os.DirEntry, error) {
+	var dirList []os.DirEntry
+
+	files, err := os.ReadDir(path)
+
+	if err != nil {
+		return nil, err
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			dirList = append(dirList, file)
+		}
+	}
+
+	return dirList, nil
+}
+
+var sidecarSuffixes = []string{
+	".supplemental-m.json",
+	".supplemental-metadata.json",
+	".supplemental-metada.json",
+}
+
+func FindSidecar(imagePath string) string {
+	for _, suffix := range sidecarSuffixes {
+		p := imagePath + suffix
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// Checks if the file at the given path has the specified extension
+func IsNameExtension(extension string, path string) bool {
+	return strings.EqualFold(filepath.Ext(path), extension)
 }
