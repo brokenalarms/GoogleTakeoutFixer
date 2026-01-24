@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -94,7 +95,7 @@ func ProcessDirectory(
 
 	var wg sync.WaitGroup
 
-	workerCount := 4
+	workerCount := runtime.NumCPU()
 
 	// Start worker goroutines
 	for i := 0; i < workerCount; i++ {
