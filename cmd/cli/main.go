@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -25,15 +26,17 @@ func main() {
 		}
 	}()
 
-	// Recieve progress event
+	// Receive progress event
 	for p := range progressCh {
 		if p.Processed == 0 {
 			continue
 		}
 
-		fmt.Println(
+		percentageFinished := math.Round(float64(p.Processed) / float64(p.Total) * 100)
+
+		fmt.Printf("[%3.0f%%] %2d/%2d - %s\n",
+			percentageFinished,
 			p.Processed,
-			"/",
 			p.Total,
 			filepath.Base(p.Current),
 		)
