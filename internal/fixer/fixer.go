@@ -28,7 +28,9 @@ func Process(sourcePath string, outputPath string) error {
 		dirPath := string(sourcePath) + /*string(os.PathSeparator) + */ dir.Name()
 		fmt.Println(dirPath)
 
-		ProcessDirectory(dirPath, outputPath)
+		var targetPath string = outputPath + dir.Name()
+
+		ProcessDirectory(dirPath, targetPath)
 
 		isYear, err := CheckWhetherYear(dir.Name())
 
@@ -103,20 +105,24 @@ func ProcessFile(sourcePath string, outputPath string) error {
 }
 
 func CreateFixedFile(filePath string, fileMetadataPath string, outputPath string) error {
+	// ensure output directory exists
+	if err := os.MkdirAll(outputPath, 0755); err != nil {
+		return err
+	}
+
 	fileName := filepath.Base(filePath)
 	destPath := filepath.Join(outputPath, fileName)
 
-	err := CopyFile(filePath, destPath)
-	if err != nil {
-		fmt.Println(err)
+	if err := CopyFile(filePath, destPath); err != nil {
+		return err
 	}
 
 	metadata, err := ReadJsonMeta(fileMetadataPath)
 	if err != nil {
-		fmt.Println(err)
+		return err
 	}
 
-	ApplyFileTime(outputPath, metadata)
+	ApplyFileTime(destPath, metadata)
 
 	return nil
 }
