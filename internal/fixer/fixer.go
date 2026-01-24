@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 type Progress struct {
@@ -87,13 +88,33 @@ func ProcessDirectory(
 		return err
 	}
 
-	for _, file := range files {
-		imagePath := filepath.Join(dirPath, file.Name())
+	// Job pools
+	jobs := make(chan string)
+	completed := make(chan string)
 
+	var wg sync.WaitGroup
+
+	workerCount := 4
+
+	// Start worker goroutines
+	for i := 0; i < workerCount; i++ {
+		go func() {
+			for imagePath := range jobs {
+				ProcessFile(imagePath, outputPath)
+				// signal completion for one job
+				completed <- imagePath
+				wg.Done()
+			}
+		}()
+	}
+
+	// Send jobs directly, add work group before transmitting job
+	for _, file := range files {
 		if file.IsDir() {
-			fmt.Println("file is a dir")
 			continue
 		}
+
+		imagePath := filepath.Join(dirPath, file.Name())
 
 		// Check whether a file is an image or not
 		// TODO: Add support for any image/video file without hard coding
@@ -102,12 +123,26 @@ func ProcessDirectory(
 			continue
 		}
 
-		ProcessFile(imagePath, outputPath)
+		wg.Add(1)
+		jobs <- imagePath
+	}
 
+	// All jobs have been sent
+	close(jobs)
+
+	// Close completed when all jobs are finished
+	go func() {
+		wg.Wait()
+		close(completed)
+	}()
+
+	// Update progress using a goroutine
+	for ev := range completed {
 		p.Processed++
-		p.Current = imagePath
+		p.Current = ev
 		progressCh <- *p
 	}
+
 	return nil
 }
 
