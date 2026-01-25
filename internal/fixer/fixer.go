@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strings"
 	"sync"
 )
 
@@ -21,28 +20,6 @@ type Progress struct {
 // -> DiscoverDirs
 // --> ProcessDirectory
 // ---> ProcessFile
-
-func CountImagesRecursive(path string) (int, error) {
-	count := 0
-
-	err := filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		extension := strings.ToLower(filepath.Ext(d.Name()))
-		if extension == ".jpg" || extension == ".jpeg" || extension == ".png" {
-			count++
-		}
-		return nil
-	})
-
-	return count, err
-}
-
 func Process(
 	sourcePath string,
 	outputPath string,
