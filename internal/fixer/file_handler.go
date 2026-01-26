@@ -14,7 +14,7 @@ var sidecarSuffixes = []string{
 }
 
 // Duplicate a file from one path to another
-func DudplicateFile(inputPath string, outputPath string) error {
+func DuplicateFile(inputPath string, outputPath string) error {
 	sourceFile, err := os.Open(inputPath)
 	if err != nil {
 		return err
