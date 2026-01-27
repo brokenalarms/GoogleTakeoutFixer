@@ -17,6 +17,7 @@ func main() {
 
 	// Create app / window
 	a := app.New()
+	a.SetIcon(resourceGoogleTakeoutFixerPng)
 	w := a.NewWindow("GoogleTakeoutFixer")
 
 	progressLabel := widget.NewLabel("")
