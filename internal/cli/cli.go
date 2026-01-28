@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"flag"
 	"fmt"
 	"math"
 	"os"
@@ -9,26 +10,29 @@ import (
 	"github.com/feloex/GoogleTakeoutFixer/internal/fixer"
 )
 
-// TODO: Add symlink flag to decide whether to use symlinks for albums
-
 func Main() {
-	if len(os.Args) < 3 {
-		fmt.Println("Flags missing! Enter InputPath and OutputPath.")
-		return
-	}
+	inputPath := flag.String("input", "", "Path to Google takeout directory")
 
-	inputPath := os.Args[1]
-	outputPath := os.Args[2]
+	outputPath := flag.String("output", "", "Path to output directory")
+
+	useSymlinks := flag.Bool("symlink", false, "Use symlinks inside of albums instead of duplicating images")
+
+	flag.Parse()
+
+	if *inputPath == "" || *outputPath == "" {
+		fmt.Println("Error: --input and --output are required")
+		flag.Usage()
+		os.Exit(1)
+	}
 
 	progressCh := make(chan fixer.Progress)
 
 	go func() {
-		if err := fixer.Process(inputPath, outputPath, progressCh, false); err != nil {
+		if err := fixer.Process(*inputPath, *outputPath, progressCh, *useSymlinks); err != nil {
 			fmt.Println("error:", err)
 		}
 	}()
 
-	// Receive progress event
 	for p := range progressCh {
 		if p.Processed == 0 {
 			continue
