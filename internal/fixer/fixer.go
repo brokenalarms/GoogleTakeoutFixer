@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 )
 
@@ -13,6 +14,19 @@ type Progress struct {
 	Total     int
 	Processed int
 	Current   string
+}
+
+// All media extension to differ between media files and other files
+var mediaExtensions = map[string]struct{}{
+	".jpg":  {},
+	".jpeg": {},
+	".png":  {},
+	".heic": {},
+
+	".mp4": {},
+	".mov": {},
+	".avi": {},
+	".mkv": {},
 }
 
 // Process is the main fixer entry point.
@@ -104,10 +118,8 @@ func ProcessDirectory(
 
 		imagePath := filepath.Join(dirPath, file.Name())
 
-		// Check whether a file is an image or not
-		// TODO: Add support for any image/video file without hard coding
-		// TODO: This check also happens within CountImagesRecursively, turn this into a function
-		if !IsNameExtension(".jpg", imagePath) && !IsNameExtension(".png", imagePath) {
+		// Check whether a file is a media file
+		if !IsMediaFile(imagePath) {
 			continue
 		}
 
@@ -229,4 +241,11 @@ func IsYearFolder(dirPath string) (bool, error) {
 	} else {
 		return false, nil
 	}
+}
+
+// Checks whether a file, that is provided using its path, is a media file
+func IsMediaFile(path string) bool {
+	extension := filepath.Ext(path)
+	_, ok := mediaExtensions[strings.ToLower(extension)]
+	return ok
 }
