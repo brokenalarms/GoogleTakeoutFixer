@@ -174,7 +174,7 @@ func CreateFixedFile(
 	fileName := filepath.Base(filePath)
 	destPath := filepath.Join(outputPath, fileName)
 
-	isYearFolder, _ := CheckWhetherYear(filepath.Base(outputPath))
+	isYearFolder, _ := IsYearFolder(filepath.Base(outputPath))
 
 	if useSymlinks && !isYearFolder {
 		// Attempt to find the file inside of any year folder in the output
@@ -185,7 +185,7 @@ func CreateFixedFile(
 				continue
 			}
 
-			isYear, _ := CheckWhetherYear(curEntry.Name())
+			isYear, _ := IsYearFolder(curEntry.Name())
 			if !isYear {
 				continue
 			}
@@ -220,7 +220,7 @@ func CreateFixedFile(
 }
 
 // Checks whether a directory is a standart google year folder
-func CheckWhetherYear(dirPath string) (bool, error) {
+func IsYearFolder(dirPath string) (bool, error) {
 	// TODO: Add support for non english takeouts
 	re := regexp.MustCompile(`^Photos from \d+$`)
 
