@@ -250,7 +250,7 @@ func CreateFixedFile(
 		return err
 	}
 
-	ApplyFileTime(destPath, metadata)
+	ApplyMetadata(destPath, metadata)
 
 	return nil
 }
