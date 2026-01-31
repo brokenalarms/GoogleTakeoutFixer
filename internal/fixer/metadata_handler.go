@@ -42,6 +42,7 @@ func ApplyFileTime(filePath string, meta imageMetadata) error {
 	// Parse timestamp
 	timestampInt, err := strconv.ParseInt(meta.PhotoTakenTime.Timestamp, 10, 64)
 	if err != nil {
+		fmt.Printf("Error parsing timestamp for %s: %v\n", filePath, err)
 		return fmt.Errorf("invalid timestamp: %v", err)
 	}
 
@@ -67,11 +68,13 @@ func ApplyFileTime(filePath string, meta imageMetadata) error {
 	cmd := exec.Command("exiftool", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		fmt.Printf("Exiftool error for %s: %v\nOutput: %s\n", filePath, err, output)
 		return fmt.Errorf("exiftool error: %v\n%s", err, output)
 	}
 
 	// Update file system timestamps after EXIF has been set
 	if err := os.Chtimes(filePath, newTime, newTime); err != nil {
+		fmt.Printf("Error updating file timestamps for %s: %v\n", filePath, err)
 		return fmt.Errorf("failed to update file timestamps: %v", err)
 	}
 

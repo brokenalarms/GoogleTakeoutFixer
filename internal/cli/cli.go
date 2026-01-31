@@ -29,7 +29,7 @@ func Main() {
 
 	go func() {
 		if err := fixer.Process(*inputPath, *outputPath, progressCh, *useSymlinks); err != nil {
-			fmt.Println("error:", err)
+			fmt.Printf("Error during processing: %v\n", err)
 		}
 	}()
 

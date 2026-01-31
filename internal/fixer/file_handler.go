@@ -1,6 +1,7 @@
 package fixer
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -58,6 +59,7 @@ func FindSidecar(imagePath string) string {
 			return p
 		}
 	}
+	fmt.Printf("No sidecar file found for %s\n", imagePath)
 	return ""
 }
 

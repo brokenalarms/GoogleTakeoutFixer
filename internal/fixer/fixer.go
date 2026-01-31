@@ -86,25 +86,31 @@ func ProcessDirectory(
 ) Progress {
 	files, err := os.ReadDir(dirPath)
 	if err != nil {
+		fmt.Printf("Error reading directory %s: %v\n", dirPath, err)
 		return p
 	}
 
-	// Job pools
 	// TODO: Fix potential race conditions
-	jobs := make(chan string)
+	// Job pools
+	// Buffered channel to avoid blocking
+	jobs := make(chan string, len(files))
 	completed := make(chan string)
+	// Channel to capture errors
+	errors := make(chan error)
 
 	var wg sync.WaitGroup
-
-	workerCount := runtime.NumCPU()
+	workerCount := runtime.NumCPU() * 2 // x2 is faster for IO tasks, x more than that has no effect based on testing
 
 	// Start worker goroutines
 	for i := 0; i < workerCount; i++ {
 		go func() {
 			for imagePath := range jobs {
-				ProcessFile(imagePath, outputPath, sourcePath, rootOutputPath, useSymlinks)
-				// signal completion for one job
-				completed <- imagePath
+				err := ProcessFile(imagePath, outputPath, sourcePath, rootOutputPath, useSymlinks)
+				if err != nil {
+					errors <- fmt.Errorf("error processing file %s: %w", imagePath, err)
+				} else {
+					completed <- imagePath
+				}
 				wg.Done()
 			}
 		}()
@@ -130,17 +136,35 @@ func ProcessDirectory(
 	// All jobs have been sent
 	close(jobs)
 
-	// Close completed when all jobs are finished
+	// Close completed and errors channels when all jobs are finished
 	go func() {
 		wg.Wait()
 		close(completed)
+		close(errors)
 	}()
 
-	// Update progress using a goroutine
-	for ev := range completed {
-		p.Processed++
-		p.Current = ev
-		progressCh <- p
+	// Update progress and handle errors
+	for {
+		select {
+		case ev, ok := <-completed:
+			if !ok {
+				completed = nil
+			} else {
+				p.Processed++
+				p.Current = ev
+				progressCh <- p
+			}
+		case err, ok := <-errors:
+			if !ok {
+				errors = nil
+			} else {
+				fmt.Printf("Error: %v\n", err)
+			}
+		}
+
+		if completed == nil && errors == nil {
+			break
+		}
 	}
 
 	return p
