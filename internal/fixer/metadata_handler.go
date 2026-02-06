@@ -16,8 +16,6 @@ import (
 	"time"
 )
 
-// TODO: Error, warning handling/logging troughout the whole fixer package is not consistent and should be improved
-
 // Struct to hold the structure of the JSON metadata
 type imageMetadata struct {
 	Title          string `json:"title"`
@@ -116,15 +114,13 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 		return fmt.Errorf("invalid timestamp: %v", err)
 	}
 
-	// TODO: Using .Local() can be false (based on my understanding), fix this
-	// newTime := time.Unix(timestampInt, 0).Local()
 	newTime := time.Unix(timestampInt, 0).UTC()
 	exifTime := newTime.Format("2006:01:02 15:04:05")
 
 	args := []string{
 		"-overwrite_original",
 		"-AllDates=" + exifTime,
-		"-TrackCreateDate=" + exifTime, // Helps with video files i think
+		"-TrackCreateDate=" + exifTime,
 		"-MediaCreateDate=" + exifTime,
 	}
 
