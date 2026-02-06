@@ -74,8 +74,7 @@ func CountImagesRecursive(path string) (int, error) {
 			return nil
 		}
 
-		extension := strings.ToLower(filepath.Ext(d.Name()))
-		if extension == ".jpg" || extension == ".jpeg" || extension == ".png" {
+		if IsMediaFile(path) {
 			count++
 		}
 		return nil
