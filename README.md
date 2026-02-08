@@ -7,10 +7,11 @@
 A tool that allows you to easily merge Google's weird JSON metadata with your images.
 
 ## The Issue
-When you download your images from Google's "Google Photos" service through "Google Takeout", the metadata (location, time of creation, etc) is **often saved separately in JSON files instead of being embedded directly into your photos and videos.**
+When you download your files from Google's "Google Photos" service through "Google Takeout", the exported data is **inconsistently organized and often fragmented.**
 This can lead to problems:
-- Files cannot be reliably sorted chronologically or by location
-- A cluttered export with a messy file structure and many unnecessary files
+- Files cannot be reliably sorted or grouped by date or location
+- The export contains unnecessary files and a cluttered folder structure
+- Your takeout having a big file size due to duplicated media and unnecessary JSON files
 
 ## Solution
 GoogleTakeoutFixer solves these issues by:
@@ -24,16 +25,37 @@ GoogleTakeoutFixer solves these issues by:
 </p>
 
 ## Tutorial
-1. Download and install the latest release of GoogleTakeoutFixer from the [releases page](https://github.com/feloex/GoogleTakeoutFixer/releases). Pick the version that matches your operating system (E.g. Windows, macOS, Linux).
-2. Extract the downloaded archive and run the executable file.
-3. In the program, click on the "Select Google Takeout folder" button and choose the folder where you extracted your Google Takeout photos. Named something like "Google Photos"
-4. Click on the "Select output folder" button and choose a folder where you want the fixed photos to be saved.
-5. Check the checkboxes that you want to apply.
-    - **"Write EXIF metadata"** will write the metadata from the JSON files into the photos and videos.
-    - **"Use symlinks for albums"** will create file links pointing to image but in the year folder instead of copying the file into the album folder. This saves a lot of disk space if you have many albums.
-6. Click the "Start processing" button and wait for the process to finish. The time it takes will depend on the amount of files in your takeout.
+### 1. Preparation
+To use GoogleTakeoutFixer, you must have downloaded your photos from Google Takeout and extracted them. Follow these steps:
 
-Once the process is complete, you can find your fixed photos in the output folder you selected.
+1. Go to [Google Takeout](https://takeout.google.com/) and click "Deselect all".
+
+    <img src="images/DeselectAllTakeout.png" alt="Google Takeout deselect button" width="400"/>
+2. Scroll down and select "Google Photos".
+
+    <img src="images/TakeoutPhotosSelect.png" alt="Google Takeout Selected" width="400"/>
+3. Scroll down to the bottom and click "Next Step".
+4. In the "Transfer to" section, choose how you'd like to recieve your download link, i recommend choosing email. For "File size", select 50 GB for easier handling.
+
+    <img src="images/CreateExportTakeout.png" alt="Create Export options" width=300>
+5. Click "Create export" and follow the instructions.
+
+**Note:** All your files need to be inside of a single folder for GoogleTakeoutFixer to work. If you have multiple folders, you can simply move all the files into one folder.
+
+### 2. Installation
+1. Download the latest release of GoogleTakeoutFixer from the [release page](https://github.com/feloex/GoogleTakeoutFixer/releases). Choose the version that matches your operating system.
+2. Extract the downloaded archive.
+3. Run the executable file.
+
+### 3. Using GoogleTakeoutFixer
+1. Click **"Select Google Takeout folder"** and choose the folder where you extracted your Google Takeout photos. This folder is named something like "Google Photos".
+2. Click **"Select output folder"** and choose the folder where you want the fixed photos to be saved.
+3. Choose the options that you want to apply:
+    - **"Write EXIF metadata"**: Writes metadata from JSON files into the media files. May not be necessary.
+    - **"Use symlinks for albums"**: Creates file links instead of duplicating files for albums.
+5. Click **"Start processing"** and wait for the process to finish. The time it takes depends on the number of photos and videos you have.
+
+Once the process is complete, you can find your fixed files in the output folder you selected.
 
 ## Planned Features
 - Support for more languages
