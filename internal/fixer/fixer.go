@@ -273,12 +273,13 @@ func CreateFixedFile(
 	if writeMetadata {
 		metadata, err := ReadJsonMetadata(fileMetadataPath)
 		if err != nil {
-			Log(LoggerError, "%s", err.Error())
-		}
-
-		err = ApplyMetadata(destPath, metadata)
-		if err != nil {
-			Log(LoggerError, "%s", err.Error())
+			Log(LoggerError, "Failed to read metadata from %s: %v", fileMetadataPath, err)
+		} else {
+			// Only apply metadata if reading was successful
+			err = ApplyMetadata(destPath, metadata)
+			if err != nil {
+				Log(LoggerError, "Failed to apply metadata to %s: %v", destPath, err)
+			}
 		}
 	}
 

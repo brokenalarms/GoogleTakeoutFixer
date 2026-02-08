@@ -22,6 +22,7 @@ type imageMetadata struct {
 	Description    string `json:"description"`
 	PhotoTakenTime struct {
 		Timestamp string `json:"timestamp"`
+		Formatted string `json:"formatted"`
 	} `json:"photoTakenTime"`
 	GeoData struct {
 		Latitude  float64 `json:"latitude"`
@@ -122,6 +123,8 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 		"-AllDates=" + exifTime,
 		"-TrackCreateDate=" + exifTime,
 		"-MediaCreateDate=" + exifTime,
+		"-FileCreateDate=" + exifTime,
+		"-FileModifyDate=" + exifTime,
 	}
 
 	// If a title exists, add it to args
@@ -186,6 +189,11 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("Failed to read from exiftool: %v", err)
+	}
+
+	// Set the file system modification time to match
+	if err := os.Chtimes(filePath, newTime, newTime); err != nil {
+		return fmt.Errorf("failed to set file timestamps: %v", err)
 	}
 
 	return nil
