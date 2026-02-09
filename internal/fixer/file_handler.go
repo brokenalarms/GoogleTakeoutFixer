@@ -61,24 +61,3 @@ func FindSidecar(imagePath string) (string, error) {
 func IsNameExtension(extension string, path string) bool {
 	return strings.EqualFold(filepath.Ext(path), extension)
 }
-
-// Counts all image files within a directory recursively
-func CountImagesRecursive(path string) (int, error) {
-	count := 0
-
-	err := filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		if IsMediaFile(path) {
-			count++
-		}
-		return nil
-	})
-
-	return count, err
-}

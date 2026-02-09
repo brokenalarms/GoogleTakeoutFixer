@@ -54,7 +54,7 @@ func Process(
 		defer CloseExifTool()
 	}
 
-	amountImages, err := CountImagesRecursive(sourcePath)
+	amountImages, err := CountProcessableFiles(sourcePath)
 	if err != nil {
 		Log(LoggerError, "Error counting images: %v", err)
 		return err
@@ -325,4 +325,36 @@ func IsMediaFile(path string) bool {
 	extension := filepath.Ext(path)
 	_, ok := mediaExtensions[strings.ToLower(extension)]
 	return ok
+}
+
+// Counts all processable files in the source path
+func CountProcessableFiles(sourcePath string) (int, error) {
+	fileInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return 0, err
+	}
+
+	if !fileInfo.IsDir() {
+		return 0, fmt.Errorf("source path is not a directory")
+	}
+
+	count := 0
+	subdirs, err := DiscoverDirs(sourcePath)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, dir := range subdirs {
+		files, _ := os.ReadDir(filepath.Join(sourcePath, dir.Name()))
+		for _, file := range files {
+			if !file.IsDir() && IsMediaFile(file.Name()) {
+				count++
+			}
+		}
+	}
+
+	if count == 0 {
+		return 0, fmt.Errorf("no media files found in folder structure")
+	}
+	return count, nil
 }
