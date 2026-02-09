@@ -193,6 +193,7 @@ func ProcessDirectory(
 }
 
 // ProcessFile processes a single file by finding its sidecar file and then fixing it using the sidecar's metadata
+// TODO: This function is written unorganized and should be refactored
 func ProcessFile(
 	sourcePath string,
 	outputPath string,
@@ -219,6 +220,14 @@ func ProcessFile(
 		if err != nil {
 			Log(LoggerError, "Error reading metadata for file %s: %v", sourcePath, err)
 		}
+	} else if writeMetadata == false {
+		// If no metadata should be written, skip reading metadata
+		err = CreateFixedFile(sourcePath, sidecarPath, outputPath, rootOutputPath, useSymlinks, false)
+		if err != nil {
+			Log(LoggerError, "Error creating fixed file for %s: %v", sourcePath, err)
+			return err
+		}
+		return nil
 	}
 
 	err = CreateFixedFile(sourcePath, sidecarPath, outputPath, rootOutputPath, useSymlinks, writeMetadata)
