@@ -62,23 +62,34 @@ func Process(
 	p.Total = amountImages
 	progressCh <- p
 
-	dirs, err := DiscoverDirs(sourcePath)
+	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
-		Log(LoggerError, "Error discovering directories: %v", err)
+		Log(LoggerError, "Error getting file info: %v", err)
+		return err
 	}
 
-	err = ProcessFile(sourcePath, outputPath, sourcePath, outputPath, useSymlinks, writeMetadata)
-	if err != nil {
-		Log(LoggerError, "Error processing file: %v", err)
-	}
+	// process all directories in the source directory, ignore files in the source directory itself
+	// because all media files should be inside of sub-folders
+	if fileInfo.IsDir() {
+		dirs, err := DiscoverDirs(sourcePath)
+		if err != nil {
+			Log(LoggerError, "Error discovering directories: %v", err)
+		}
 
-	for _, dir := range dirs {
-
-		dirPath := filepath.Join(sourcePath, dir.Name())
-
-		var targetPath string = filepath.Join(outputPath, dir.Name())
-
-		p = ProcessDirectory(dirPath, targetPath, sourcePath, outputPath, useSymlinks, writeMetadata, p, progressCh)
+		for _, dir := range dirs {
+			dirPath := filepath.Join(sourcePath, dir.Name())
+			var targetPath string = filepath.Join(outputPath, dir.Name())
+			p = ProcessDirectory(dirPath, targetPath, sourcePath, outputPath, useSymlinks, writeMetadata, p, progressCh)
+		}
+	} else {
+		err = ProcessFile(sourcePath, outputPath, sourcePath, outputPath, useSymlinks, writeMetadata)
+		if err != nil {
+			Log(LoggerError, "Error processing file: %v", err)
+		} else {
+			p.Processed++
+			p.Current = sourcePath
+			progressCh <- p
+		}
 	}
 
 	return nil
