@@ -4,7 +4,7 @@
     <img src="images/GoogleTakeoutFixer.png" alt="drawing" width="200"/>
 </p>
 
-A tool that allows you to easily merge Google's weird JSON metadata with your images.
+A tool to easily clean and organize Google Photos Takeout exports.
 
 ## The Issue
 When you download your files from Google's "Google Photos" service through "Google Takeout", the exported data is **inconsistently organized and often fragmented.**
