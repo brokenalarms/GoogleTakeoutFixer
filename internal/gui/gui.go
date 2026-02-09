@@ -22,7 +22,7 @@ func Main() {
 	w.Resize(fyne.NewSize(550, 400))
 
 	var useSymlinks bool = false
-	var writeExif bool = false
+	var writeMetadata bool = false
 
 	progressLabel := widget.NewLabel("")
 	progressLabel.Truncation = fyne.TextTruncateEllipsis
@@ -57,9 +57,9 @@ func Main() {
 		fmt.Println("use symlinks", useSymlinks)
 	})
 
-	WriteExifCheckbox := widget.NewCheck("Write EXIF metadata", func(value bool) {
-		writeExif = value
-		fmt.Println("write exif", writeExif)
+	WriteMetadataCheckbox := widget.NewCheck("Write metadata", func(value bool) {
+		writeMetadata = value
+		fmt.Println("write metadata", writeMetadata)
 	})
 
 	// Button to start processing
@@ -81,7 +81,7 @@ func Main() {
 		progressCh := make(chan fixer.Progress)
 
 		go func() {
-			if err := fixer.Process(inputPath, outputPath, progressCh, useSymlinks, writeExif); err != nil {
+			if err := fixer.Process(inputPath, outputPath, progressCh, useSymlinks, writeMetadata); err != nil {
 				fyne.Do(func() {
 					progressLabel.SetText("Error: " + err.Error())
 				})
@@ -144,7 +144,7 @@ func Main() {
 
 	CheckBoxes := container.NewVBox(
 		UseLinksCheckbox,
-		WriteExifCheckbox,
+		WriteMetadataCheckbox,
 	)
 
 	SecondRow := container.NewGridWithColumns(
