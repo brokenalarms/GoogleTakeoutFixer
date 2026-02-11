@@ -234,6 +234,14 @@ func ProcessFile(
 	sourcePath string,
 	outputPath string,
 ) error {
+	fileName := filepath.Base(sourcePath)
+	destPath := filepath.Join(outputPath, fileName)
+
+	if _, err := os.Stat(destPath); err == nil {
+		Log(LoggerInfo, "File %s already exists, skipping", destPath)
+		return nil
+	}
+
 	sidecarPath, err := FindSidecar(sourcePath)
 
 	if err != nil {
@@ -247,22 +255,7 @@ func ProcessFile(
 		return nil
 	}
 
-	if fixerCtx.Options.WriteMetadata {
-		_, err := ReadJsonMetadata(sidecarPath)
-		if err != nil {
-			Log(LoggerError, "Error reading metadata for file %s: %v", sourcePath, err)
-		}
-	} else if fixerCtx.Options.WriteMetadata == false {
-		// If no metadata should be written, skip reading metadata
-		err = CreateFixedFile(fixerCtx, sourcePath, sidecarPath, outputPath)
-		if err != nil {
-			Log(LoggerError, "Error creating fixed file for %s: %v", sourcePath, err)
-			return err
-		}
-		return nil
-	}
-
-	err = CreateFixedFile(fixerCtx, sourcePath, sidecarPath, outputPath)
+	err = CreateFixedFile(fixerCtx, sourcePath, sidecarPath, destPath)
 	if err != nil {
 		Log(LoggerError, "Error creating fixed file for %s: %v", sourcePath, err)
 		return err
@@ -275,17 +268,16 @@ func CreateFixedFile(
 	fixerCtx *FixerContext,
 	filePath string,
 	fileMetadataPath string,
-	outputPath string,
+	destPath string,
 ) error {
 	// Ensure output directory exists
-	if err := os.MkdirAll(outputPath, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return err
 	}
 
-	fileName := filepath.Base(filePath)
-	destPath := filepath.Join(outputPath, fileName)
+	fileName := filepath.Base(destPath)
 
-	isYearFolder, _ := IsYearFolder(filepath.Base(outputPath))
+	isYearFolder, _ := IsYearFolder(filepath.Base(filepath.Dir(destPath)))
 
 	if fixerCtx.Options.UseSymlinks && !isYearFolder {
 		// Attempt to find the file inside of any year folder in the output
