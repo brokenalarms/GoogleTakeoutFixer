@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"math"
@@ -32,8 +33,9 @@ func Main() {
 
 	progressCh := make(chan fixer.Progress)
 
+	options := fixer.ProcessOptions{UseSymlinks: *useSymlinks, WriteMetadata: !*skipExif}
 	go func() { // Invert skipExif because the flag is named skipExif but the process function expects writeMetadata
-		if err := fixer.Process(*inputPath, *outputPath, progressCh, *useSymlinks, !*skipExif); err != nil {
+		if err := fixer.Process(context.Background(), *inputPath, *outputPath, progressCh, options); err != nil {
 			fmt.Printf("Error during processing: %v\n", err)
 		}
 	}()

@@ -1,6 +1,7 @@
 package fixer
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,21 @@ type Progress struct {
 	Total     int
 	Processed int
 	Current   string
+}
+
+// TODO: Add more options
+// TODO: Disable checkboxes when processing
+type ProcessOptions struct {
+	UseSymlinks   bool
+	WriteMetadata bool
+}
+
+type FixerContext struct {
+	Ctx        context.Context
+	SourceRoot string
+	OutputRoot string
+	Options    ProcessOptions
+	ProgressCh chan<- Progress
 }
 
 // All media extension to differ between media files and other files
@@ -34,17 +50,21 @@ var mediaExtensions = map[string]struct{}{
 // ---> ProcessFile
 // TODO: Do something in case files already exists instead of overwriting them
 func Process(
+	ctx context.Context,
 	sourcePath string,
 	outputPath string,
 	progressCh chan<- Progress,
-	useSymlinks bool,
-	writeMetadata bool,
+	options ProcessOptions,
 ) error {
 	Log(LoggerInfo, "Starting processing with source: %s and output: %s", sourcePath, outputPath)
 	defer close(progressCh)
 	p := Progress{}
 
-	if writeMetadata {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	if options.WriteMetadata {
 		if err := InitializeExifTool(); err != nil {
 			Log(LoggerError, "Failed to initialize exiftool: %v", err)
 			return err
@@ -66,6 +86,14 @@ func Process(
 		return err
 	}
 
+	fixerCtx := &FixerContext{
+		Ctx:        ctx,
+		SourceRoot: sourcePath,
+		OutputRoot: outputPath,
+		Options:    options,
+		ProgressCh: progressCh,
+	}
+
 	// process all directories in the source directory, ignore files in the source directory itself
 	// because all media files should be inside of sub-folders
 	if fileInfo.IsDir() {
@@ -75,12 +103,16 @@ func Process(
 		}
 
 		for _, dir := range dirs {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
 			dirPath := filepath.Join(sourcePath, dir.Name())
 			var targetPath string = filepath.Join(outputPath, dir.Name())
-			p = ProcessDirectory(dirPath, targetPath, sourcePath, outputPath, useSymlinks, writeMetadata, p, progressCh)
+			p = ProcessDirectory(fixerCtx, dirPath, targetPath, p)
 		}
 	} else {
-		err = ProcessFile(sourcePath, outputPath, sourcePath, outputPath, useSymlinks, writeMetadata)
+		err = ProcessFile(fixerCtx, sourcePath, outputPath)
 		if err != nil {
 			Log(LoggerError, "Error processing file: %v", err)
 		} else {
@@ -95,14 +127,10 @@ func Process(
 
 // Process a directory and fix all files within the directory. Ignores sub-directories.
 func ProcessDirectory(
+	fixerCtx *FixerContext,
 	dirPath string,
 	outputPath string,
-	sourcePath string,
-	rootOutputPath string,
-	useSymlinks bool,
-	writeMetadata bool,
 	p Progress,
-	progressCh chan<- Progress,
 ) Progress {
 	files, err := os.ReadDir(dirPath)
 	if err != nil {
@@ -125,7 +153,11 @@ func ProcessDirectory(
 	for i := 0; i < workerCount; i++ {
 		go func() {
 			for imagePath := range jobs {
-				err := ProcessFile(imagePath, outputPath, sourcePath, rootOutputPath, useSymlinks, writeMetadata)
+				if fixerCtx.Ctx.Err() != nil {
+					wg.Done()
+					continue
+				}
+				err := ProcessFile(fixerCtx, imagePath, outputPath)
 				if err != nil {
 					errors <- fmt.Errorf("error processing file %s: %w", imagePath, err)
 				} else {
@@ -138,6 +170,9 @@ func ProcessDirectory(
 
 	// Send jobs directly, add work group before transmitting job
 	for _, file := range files {
+		if fixerCtx.Ctx.Err() != nil {
+			break
+		}
 		if file.IsDir() {
 			continue
 		}
@@ -172,7 +207,7 @@ func ProcessDirectory(
 			} else {
 				p.Processed++
 				p.Current = ev
-				progressCh <- p
+				fixerCtx.ProgressCh <- p
 			}
 		case err, ok := <-errors:
 			if !ok {
@@ -180,6 +215,8 @@ func ProcessDirectory(
 			} else {
 				Log(LoggerError, "%v", err)
 			}
+		case <-fixerCtx.Ctx.Done():
+			// Let workers finish their current job but dont add new jobs
 		}
 
 		if completed == nil && errors == nil {
@@ -193,12 +230,9 @@ func ProcessDirectory(
 // ProcessFile processes a single file by finding its sidecar file and then fixing it using the sidecar's metadata
 // TODO: This function is written unorganized and should be refactored
 func ProcessFile(
+	fixerCtx *FixerContext,
 	sourcePath string,
 	outputPath string,
-	rootSourcePath string,
-	rootOutputPath string,
-	useSymlinks bool,
-	writeMetadata bool,
 ) error {
 	sidecarPath, err := FindSidecar(sourcePath)
 
@@ -213,14 +247,14 @@ func ProcessFile(
 		return nil
 	}
 
-	if writeMetadata {
+	if fixerCtx.Options.WriteMetadata {
 		_, err := ReadJsonMetadata(sidecarPath)
 		if err != nil {
 			Log(LoggerError, "Error reading metadata for file %s: %v", sourcePath, err)
 		}
-	} else if writeMetadata == false {
+	} else if fixerCtx.Options.WriteMetadata == false {
 		// If no metadata should be written, skip reading metadata
-		err = CreateFixedFile(sourcePath, sidecarPath, outputPath, rootOutputPath, useSymlinks, false)
+		err = CreateFixedFile(fixerCtx, sourcePath, sidecarPath, outputPath)
 		if err != nil {
 			Log(LoggerError, "Error creating fixed file for %s: %v", sourcePath, err)
 			return err
@@ -228,7 +262,7 @@ func ProcessFile(
 		return nil
 	}
 
-	err = CreateFixedFile(sourcePath, sidecarPath, outputPath, rootOutputPath, useSymlinks, writeMetadata)
+	err = CreateFixedFile(fixerCtx, sourcePath, sidecarPath, outputPath)
 	if err != nil {
 		Log(LoggerError, "Error creating fixed file for %s: %v", sourcePath, err)
 		return err
@@ -238,12 +272,10 @@ func ProcessFile(
 }
 
 func CreateFixedFile(
+	fixerCtx *FixerContext,
 	filePath string,
 	fileMetadataPath string,
 	outputPath string,
-	rootOutputPath string,
-	useSymlinks bool,
-	writeMetadata bool,
 ) error {
 	// Ensure output directory exists
 	if err := os.MkdirAll(outputPath, 0755); err != nil {
@@ -255,10 +287,10 @@ func CreateFixedFile(
 
 	isYearFolder, _ := IsYearFolder(filepath.Base(outputPath))
 
-	if useSymlinks && !isYearFolder {
+	if fixerCtx.Options.UseSymlinks && !isYearFolder {
 		// Attempt to find the file inside of any year folder in the output
 		// TODO: Make this more efficient, whole output directory is being searched every time
-		entries, _ := os.ReadDir(rootOutputPath)
+		entries, _ := os.ReadDir(fixerCtx.OutputRoot)
 		for _, curEntry := range entries {
 			if !curEntry.IsDir() {
 				continue
@@ -269,7 +301,7 @@ func CreateFixedFile(
 				continue
 			}
 
-			target := filepath.Join(rootOutputPath, curEntry.Name(), fileName)
+			target := filepath.Join(fixerCtx.OutputRoot, curEntry.Name(), fileName)
 			if _, err := os.Stat(target); err == nil {
 				if err := os.Symlink(target, destPath); err != nil {
 					// Symlink failed, continue with normal copy
@@ -288,7 +320,7 @@ func CreateFixedFile(
 		return err
 	}
 
-	if writeMetadata {
+	if fixerCtx.Options.WriteMetadata {
 		metadata, err := ReadJsonMetadata(fileMetadataPath)
 		if err != nil {
 			Log(LoggerError, "Failed to read metadata from %s: %v", fileMetadataPath, err)

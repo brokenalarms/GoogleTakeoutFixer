@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
@@ -27,6 +28,8 @@ func Main() {
 	progressLabel := widget.NewLabel("")
 	progressLabel.Truncation = fyne.TextTruncateEllipsis
 	progressBar := widget.NewProgressBar()
+	var cancelFn context.CancelFunc
+	var cancelButton *widget.Button
 
 	// Button for opening file dialog for choosing google takeout path and output path
 	var inputButton *widget.Button
@@ -78,13 +81,20 @@ func Main() {
 		progressLabel.SetText("Processing")
 		progressBar.SetValue(0)
 
+		ctx, cancel := context.WithCancel(context.Background())
+		cancelFn = cancel
+		cancelButton.Enable()
+
 		progressCh := make(chan fixer.Progress)
 
+		opts := fixer.ProcessOptions{UseSymlinks: useSymlinks, WriteMetadata: writeMetadata}
 		go func() {
-			if err := fixer.Process(inputPath, outputPath, progressCh, useSymlinks, writeMetadata); err != nil {
-				fyne.Do(func() {
-					progressLabel.SetText("Error: " + err.Error())
-				})
+			if err := fixer.Process(ctx, inputPath, outputPath, progressCh, opts); err != nil {
+				if ctx.Err() == nil {
+					fyne.Do(func() {
+						progressLabel.SetText("Error: " + err.Error())
+					})
+				}
 			}
 		}()
 
@@ -106,8 +116,14 @@ func Main() {
 
 			// Processing complete
 			fyne.Do(func() {
-				progressLabel.SetText("Done")
-				progressBar.SetValue(progressBar.Max)
+				if ctx.Err() != nil {
+					progressLabel.SetText("Cancelled")
+				} else {
+					progressLabel.SetText("Done")
+					progressBar.SetValue(progressBar.Max)
+				}
+				cancelButton.Disable()
+				cancelFn = nil
 				inputButton.Enable()
 				outputButton.Enable()
 				startButton.Enable()
@@ -115,16 +131,18 @@ func Main() {
 		}()
 	})
 
+	cancelButton = widget.NewButton("Cancel", func() {
+		if cancelFn == nil {
+			return
+		}
+		progressLabel.SetText("Cancelling...")
+		cancelButton.Disable()
+		cancelFn()
+	})
+	cancelButton.Disable()
+
 	logEntry := widget.NewMultiLineEntry()
 	logEntry.Disable()
-
-	fixer.LogHandler = func(level fixer.LogLevel, message string) {
-		logMsg := fmt.Sprintf("[%s] %s\n", level, message)
-		fyne.Do(func() {
-			logEntry.SetText(logEntry.Text + logMsg)
-			logEntry.Refresh()
-		})
-	}
 
 	fixer.LogHandler = func(level fixer.LogLevel, message string) {
 		logMsg := fmt.Sprintf("[%s] %s\n", level, message)
@@ -150,7 +168,7 @@ func Main() {
 	SecondRow := container.NewGridWithColumns(
 		2,
 		CheckBoxes,
-		startButton,
+		container.NewGridWithColumns(2, startButton, cancelButton),
 	)
 
 	topContent := container.NewVBox(
