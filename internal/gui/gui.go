@@ -154,6 +154,8 @@ func Main() {
 			}
 
 			logEntry.SetText(strings.Join(visibleLogLines, "\n") + "\n")
+			logEntry.CursorRow = len(visibleLogLines)
+			logEntry.CursorColumn = 0
 			logEntry.Refresh()
 		})
 	}
