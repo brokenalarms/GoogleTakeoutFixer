@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
 )
 
 type Progress struct {
@@ -57,6 +58,13 @@ func Process(
 	options ProcessOptions,
 ) error {
 	Log(LoggerInfo, "Starting processing with source: %s and output: %s", sourcePath, outputPath)
+
+	// Log total processing time when processing is done
+	startTime := time.Now()
+	defer func() {
+		Log(LoggerInfo, "Total processing time: %s", time.Since(startTime).Round(time.Second))
+	}()
+
 	defer close(progressCh)
 	p := Progress{}
 
