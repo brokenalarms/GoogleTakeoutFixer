@@ -271,9 +271,13 @@ func ProcessFile(
 		return err
 	}
 
-	// Metadata sidecar file not found
+	// Metadata sidecar file not found, copy the file without metadata
 	if sidecarPath == "" {
-		Log(LoggerWarn, "No sidecar file found for %s", sourcePath)
+		Log(LoggerWarn, "No sidecar file found for %s — copying without metadata", sourcePath)
+		if err := CreateFixedFile(fixerCtx, sourcePath, "", destPath); err != nil {
+			Log(LoggerError, "Error creating file without sidecar for %s: %v", sourcePath, err)
+			return err
+		}
 		return nil
 	}
 
@@ -334,7 +338,7 @@ func CreateFixedFile(
 		return err
 	}
 
-	if fixerCtx.Options.WriteMetadata {
+	if fixerCtx.Options.WriteMetadata && fileMetadataPath != "" {
 		metadata, err := ReadJsonMetadata(fileMetadataPath)
 		if err != nil {
 			Log(LoggerError, "Failed to read metadata from %s: %v", fileMetadataPath, err)
@@ -345,6 +349,8 @@ func CreateFixedFile(
 				Log(LoggerError, "Failed to apply metadata to %s: %v", destPath, err)
 			}
 		}
+	} else if fixerCtx.Options.WriteMetadata && fileMetadataPath == "" {
+		Log(LoggerInfo, "WriteMetadata enabled but no sidecar for %s — skipping metadata write", fileName)
 	}
 
 	return nil
