@@ -78,7 +78,6 @@ Example usage:
 You might have to give the executable permissions to run on Linux and macOS using `chmod +x GoogleTakeoutFixer` before you can run it through the terminal.
 
 ## Planned Features
-- Support for more languages
 - Better looking and more user-friendly GUI
 - More options for how to organize / structure the output folder
 - A simple website for users who are not familiar with Github
