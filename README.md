@@ -79,7 +79,6 @@ You might have to give the executable permissions to run on Linux and macOS usin
 
 ## Planned Features
 - Support for more languages
-- Live photo support
 - Better looking and more user-friendly GUI
 - More options for how to organize / structure the output folder
 - A simple website for users who are not familiar with Github
