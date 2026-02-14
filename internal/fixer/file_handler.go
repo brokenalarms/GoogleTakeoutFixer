@@ -67,12 +67,28 @@ func IsNameExtension(extension string, path string) bool {
 // Checks whether a directory is a standart google year folder
 func IsYearFolder(dirPath string) (bool, error) {
 	// Year folder prefixes of some countries
+	// yearPrefixes is mostly made by AI. I have not verified these, but i assume they are primarily correct.
+	// Please create an issue if you find any mistakes or if you want to add more languages.
 	yearPrefixes := []string{
-		"Photos from ", // English
-		"Fotos von ",   // German
-		"Photos de ",   // French
-		"Foto del ",    // Italian
-		"Fotos de ",    // Spanish / Portuguese
+		"Photos from ",     // English
+		"Fotos von ",       // German
+		"Photos de ",       // French
+		"Foto del ",        // Italian
+		"Fotos de ",        // Spanish / Portuguese
+		"Foto's van ",      // Dutch
+		"Zdjęcia z ",       // Polish
+		"Фотографии из ",   // Russian
+		"Foton från ",      // Swedish
+		"Bilder fra ",      // Norwegian
+		"Billeder fra ",    // Danish
+		"Fotoğraflar ",     // Turkish
+		"Fotografie z ",    // Czech
+		"Fotók a ",         // Hungarian
+		"Φωτογραφίες από ", // Greek
+		"Fotografii din ",  // Romanian
+		"Foto dari ",       // Indonesian
+		"รูปภาพจาก ",       // Thai
+		"Ảnh từ ",          // Vietnamese
 	}
 
 	for _, prefix := range yearPrefixes {
