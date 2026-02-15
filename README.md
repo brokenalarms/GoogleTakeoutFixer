@@ -1,5 +1,10 @@
 # GoogleTakeoutFixer
 
+![GitHub Repo stars](https://img.shields.io/github/stars/feloex/GoogleTakeoutFixer?style=flat&color=yellow)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/feloex/GoogleTakeoutFixer/total?style=flat&color=dark-green)
+![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/feloex/GoogleTakeoutFixer/latest/total?style=flat&color=dark-green)
+[![Go Report Card](https://goreportcard.com/badge/github.com/feloex/GoogleTakeoutFixer)](https://goreportcard.com/report/github.com/feloex/GoogleTakeoutFixer)
+
 <p align="center">
     <img src="images/GoogleTakeoutFixer.png" alt="drawing" width="200"/>
 </p>
