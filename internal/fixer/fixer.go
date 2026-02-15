@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 )
@@ -30,27 +29,6 @@ type FixerContext struct {
 	OutputRoot string
 	Options    ProcessOptions
 	ProgressCh chan<- Progress
-}
-
-// All media extension to differ between media files and other files
-var imageExtensions = map[string]struct{}{
-	".jpg":  {},
-	".jpeg": {},
-	".png":  {},
-	".heic": {},
-}
-
-var videoExtensions = map[string]struct{}{
-	".mp4": {},
-	".mov": {},
-	".avi": {},
-	".mkv": {},
-}
-
-func IsVideoFile(path string) bool {
-	extension := filepath.Ext(path)
-	_, ok := videoExtensions[strings.ToLower(extension)]
-	return ok
 }
 
 // Process is the main fixer entry point.

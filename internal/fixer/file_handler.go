@@ -9,6 +9,28 @@ import (
 	"strings"
 )
 
+// All media extension to differ between media files and other files
+var imageExtensions = map[string]struct{}{
+	".jpg":  {},
+	".jpeg": {},
+	".png":  {},
+	".heic": {},
+}
+
+var videoExtensions = map[string]struct{}{
+	".mp4": {},
+	".mov": {},
+	".avi": {},
+	".mkv": {},
+}
+
+// Checks whether a file is a video file based on its extension
+func IsVideoFile(path string) bool {
+	extension := filepath.Ext(path)
+	_, ok := videoExtensions[strings.ToLower(extension)]
+	return ok
+}
+
 // Duplicate a file from one path to another
 func DuplicateFile(inputPath string, outputPath string) error {
 	sourceFile, err := os.Open(inputPath)
