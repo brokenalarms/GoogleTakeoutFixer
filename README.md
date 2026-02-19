@@ -55,6 +55,9 @@ To use GoogleTakeoutFixer, you must have downloaded your photos from Google Take
 2. Extract the downloaded archive.
 3. Run the executable file.
 
+> [!IMPORTANT]
+> When running the executable, a window about security can pop-up if you are using Windows. **Click "more info" and "run anyway"**.
+
 ### 3. Using GoogleTakeoutFixer
 1. Click **"Select Google Takeout folder"** and choose the folder where you extracted your Google Takeout photos. This folder is named something like "Google Photos".
 2. Click **"Select output folder"** and choose the folder where you want the fixed photos to be saved.
