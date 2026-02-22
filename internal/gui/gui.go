@@ -159,9 +159,20 @@ func Main() {
 	cancelButton.Disable()
 
 	logEntry := widget.NewMultiLineEntry()
-	logEntry.Disable()
 	const maxVisibleLogLines = 200
 	visibleLogLines := make([]string, 0, maxVisibleLogLines)
+
+	// Prevent user from editing the log while keeping text selectable
+	// This is not optimal but fyne does not provide a better way to do this
+	var logUpdating bool
+	logEntry.OnChanged = func(_ string) {
+		if logUpdating {
+			return
+		}
+		logUpdating = true
+		logEntry.SetText(strings.Join(visibleLogLines, "\n") + "\n")
+		logUpdating = false
+	}
 
 	fixer.LogHandler = func(level fixer.LogLevel, message string) {
 		logMsg := fmt.Sprintf("[%s] %s", level, message)
@@ -171,7 +182,9 @@ func Main() {
 				visibleLogLines = visibleLogLines[len(visibleLogLines)-maxVisibleLogLines:]
 			}
 
+			logUpdating = true
 			logEntry.SetText(strings.Join(visibleLogLines, "\n") + "\n")
+			logUpdating = false
 			logEntry.CursorRow = len(visibleLogLines)
 			logEntry.CursorColumn = 0
 			logEntry.Refresh()
