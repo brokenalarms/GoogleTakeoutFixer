@@ -27,6 +27,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/feloex/GoogleTakeoutFixer/internal/fixer"
 	version "github.com/feloex/GoogleTakeoutFixer/internal/version"
@@ -56,7 +57,7 @@ func Main() {
 
 	// Button for opening file dialog for choosing google takeout path and output path
 	var inputButton *widget.Button
-	inputButton = widget.NewButton("Select Google Takeout Folder", func() {
+	inputButton = widget.NewButtonWithIcon("Select Google Takeout Folder", theme.FolderOpenIcon(), func() {
 		dir, err := zenity.SelectFile(zenity.Title("Select Google Takeout Folder"), zenity.Directory())
 		if err == nil {
 			inputPath = dir
@@ -66,7 +67,7 @@ func Main() {
 	})
 
 	var outputButton *widget.Button
-	outputButton = widget.NewButton("Select Output Folder", func() {
+	outputButton = widget.NewButtonWithIcon("Select Output Folder", theme.FolderOpenIcon(), func() {
 		dir, err := zenity.SelectFile(zenity.Title("Select Output Folder"), zenity.Directory())
 		if err == nil {
 			outputPath = dir
