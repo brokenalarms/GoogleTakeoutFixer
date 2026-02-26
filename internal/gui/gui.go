@@ -128,7 +128,7 @@ func Main() {
 
 	// Button to start processing
 	var startButton *widget.Button
-	startButton = widget.NewButton("Start Processing", func() {
+	startButton = widget.NewButtonWithIcon("Start Processing", theme.MediaPlayIcon(), func() {
 		// one of the folders has not been selected
 		if inputPath == "" || outputPath == "" {
 			progressLabel.SetText("Select both in and output")
@@ -198,7 +198,7 @@ func Main() {
 		}()
 	})
 
-	cancelButton = widget.NewButton("Cancel", func() {
+	cancelButton = widget.NewButtonWithIcon("Cancel", theme.CancelIcon(), func() {
 		if cancelFn == nil {
 			return
 		}
