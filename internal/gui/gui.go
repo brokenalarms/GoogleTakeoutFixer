@@ -27,6 +27,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/feloex/GoogleTakeoutFixer/internal/fixer"
 	version "github.com/feloex/GoogleTakeoutFixer/internal/version"
@@ -56,7 +57,7 @@ func Main() {
 
 	// Button for opening file dialog for choosing google takeout path and output path
 	var inputButton *widget.Button
-	inputButton = widget.NewButton("Select Google Takeout Folder", func() {
+	inputButton = widget.NewButtonWithIcon("Select Google Takeout Folder", theme.FolderOpenIcon(), func() {
 		dir, err := zenity.SelectFile(zenity.Title("Select Google Takeout Folder"), zenity.Directory())
 		if err == nil {
 			inputPath = dir
@@ -66,7 +67,7 @@ func Main() {
 	})
 
 	var outputButton *widget.Button
-	outputButton = widget.NewButton("Select Output Folder", func() {
+	outputButton = widget.NewButtonWithIcon("Select Output Folder", theme.FolderOpenIcon(), func() {
 		dir, err := zenity.SelectFile(zenity.Title("Select Output Folder"), zenity.Directory())
 		if err == nil {
 			outputPath = dir
@@ -127,10 +128,10 @@ func Main() {
 
 	// Button to start processing
 	var startButton *widget.Button
-	startButton = widget.NewButton("Start Processing", func() {
+	startButton = widget.NewButtonWithIcon("Start Processing", theme.MediaPlayIcon(), func() {
 		// one of the folders has not been selected
 		if inputPath == "" || outputPath == "" {
-			progressLabel.SetText("Select both in and output")
+			fixer.Log(fixer.LoggerInfo, "Select both input and output folders")
 			return
 		}
 
@@ -138,7 +139,7 @@ func Main() {
 		inputButton.Disable()
 		outputButton.Disable()
 		startButton.Disable()
-		progressLabel.SetText("Processing")
+		fixer.Log(fixer.LoggerInfo, "Processing...")
 		progressBar.SetValue(0)
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -158,13 +159,14 @@ func Main() {
 			if err := fixer.Process(ctx, inputPath, outputPath, progressCh, opts); err != nil {
 				if ctx.Err() == nil {
 					fyne.Do(func() {
-						progressLabel.SetText("Error: " + err.Error())
+						fixer.Log(fixer.LoggerError, "Error: "+err.Error())
 					})
 				}
 			}
 		}()
 
 		// Update progress
+
 		go func() {
 			for p := range progressCh {
 				percentage := 0.0
@@ -183,9 +185,9 @@ func Main() {
 			// Processing complete
 			fyne.Do(func() {
 				if ctx.Err() != nil {
-					progressLabel.SetText("Cancelled")
+					fixer.Log(fixer.LoggerInfo, "Cancelled")
 				} else {
-					progressLabel.SetText("Done")
+					fixer.Log(fixer.LoggerInfo, "Done")
 					progressBar.SetValue(progressBar.Max)
 				}
 				cancelButton.Disable()
@@ -197,11 +199,11 @@ func Main() {
 		}()
 	})
 
-	cancelButton = widget.NewButton("Cancel", func() {
+	cancelButton = widget.NewButtonWithIcon("Cancel", theme.CancelIcon(), func() {
 		if cancelFn == nil {
 			return
 		}
-		progressLabel.SetText("Cancelling...")
+		fixer.Log(fixer.LoggerInfo, "Cancelling...")
 		cancelButton.Disable()
 		cancelFn()
 	})
@@ -219,7 +221,7 @@ func Main() {
 			return
 		}
 		logUpdating = true
-		logEntry.SetText(strings.Join(visibleLogLines, "\n") + "\n")
+		//logEntry.SetText(strings.Join(visibleLogLines, "\n") + "\n")
 		logUpdating = false
 	}
 
@@ -240,8 +242,10 @@ func Main() {
 		})
 	}
 
-	visibleLogLines = append(visibleLogLines, "Logs will appear here...")
-	logEntry.SetText("Logs will appear here...\n")
+	/*visibleLogLines = append(visibleLogLines, "Logs will appear here...")
+	logEntry.SetText("Logs will appear here...\n")*/
+
+	fixer.Log(fixer.LoggerInfo, "Logs will appear here...")
 
 	folderButtons := container.NewGridWithColumns(
 		2,
@@ -249,7 +253,8 @@ func Main() {
 		outputButton,
 	)
 
-	checkBoxes := container.NewVBox(
+	CheckBoxRow := container.NewGridWithColumns(
+		2,
 		useLinksCheckbox,
 		writeMetadataCheckbox,
 		ignoreAlbumsCheckbox,
@@ -257,18 +262,19 @@ func Main() {
 		flattenCheckbox,
 	)
 
-	secondRow := container.NewGridWithColumns(
-		2,
-		checkBoxes,
-		container.NewGridWithColumns(2, startButton, cancelButton),
-	)
+	StartCancelRow := container.NewGridWithColumns(2, startButton, cancelButton)
+
+	FolderSeperator := container.NewPadded(widget.NewSeparator())
+	OptionsSeparator := container.NewPadded(widget.NewSeparator())
 
 	topContent := container.NewVBox(
 		folderButtons,
-		secondRow,
-
-		progressLabel,
+		FolderSeperator,
+		CheckBoxRow,
+		OptionsSeparator,
+		StartCancelRow,
 		progressBar,
+		//progressLabel,
 	)
 
 	w.SetContent(container.NewBorder(
