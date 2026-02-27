@@ -44,7 +44,7 @@ func Main() {
 	w.Resize(fyne.NewSize(550, 400))
 
 	var useSymlinks bool = false
-	var writeMetadata bool = false
+	var writeMetadata bool = true
 	var flatten bool = false
 	var ignoreAlbums bool = false
 	var monthSubfolders bool = false
@@ -86,6 +86,7 @@ func Main() {
 		writeMetadata = value
 		fmt.Println("write metadata", writeMetadata)
 	})
+	writeMetadataCheckbox.SetChecked(true)
 
 	ignoreAlbumsCheckbox := widget.NewCheck("Ignore album folders", func(value bool) {
 		ignoreAlbums = value
