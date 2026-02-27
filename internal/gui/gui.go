@@ -221,7 +221,7 @@ func Main() {
 			return
 		}
 		logUpdating = true
-		//logEntry.SetText(strings.Join(visibleLogLines, "\n") + "\n")
+		logEntry.SetText(strings.Join(visibleLogLines, "\n") + "\n")
 		logUpdating = false
 	}
 
