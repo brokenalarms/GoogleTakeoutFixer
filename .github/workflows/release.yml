@@ -15,88 +15,89 @@ env:
   APP_NAME: GoogleTakeoutFixer
 
 jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux_x64,     runs-on: ubuntu-latest,    goos: linux,   goarch: amd64, cc: "",                      archive: tar.gz }
+          - { name: Linux_arm64,   runs-on: ubuntu-24.04-arm, goos: linux,   goarch: arm64, cc: "",                      archive: tar.gz }
+          - { name: Windows_x64,   runs-on: ubuntu-latest,    goos: windows, goarch: amd64, cc: x86_64-w64-mingw32-gcc,  archive: zip }
+          - { name: Windows_arm64, runs-on: ubuntu-latest,    goos: windows, goarch: arm64, cc: aarch64-w64-mingw32-gcc, archive: zip }
 
-  build-linux:
-    name: Build Linux x64
-    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Install dependencies
+      - name: Install Linux deps
+        if: matrix.goos == 'linux'
         run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
 
+      - name: Install Windows x64 deps
+        if: matrix.name == 'Windows_x64'
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 zip
+
+      - name: Install Windows arm64 deps
+        if: matrix.name == 'Windows_arm64'
+        run: |
+          sudo apt-get update && sudo apt-get install -y zip
+          URL=$(curl -fsSL https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest | \
+            jq -r '.assets[] | select(.name | test("ucrt-ubuntu.*x86_64\\.tar\\.xz$")) | .browser_download_url')
+          FILENAME=$(basename "$URL")
+          curl -fsSL -o llvm-mingw.tar.xz "$URL"
+          tar xf llvm-mingw.tar.xz
+          echo "$PWD/${FILENAME%.tar.xz}/bin" >> $GITHUB_PATH
+
+      - name: Set CC
+        if: matrix.cc != ''
+        run: echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
+
       - name: Build & Bundle
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          OUT="${APP_NAME}_Linux_x64"
+          OUT="${APP_NAME}_${{ matrix.name }}"
+          EXT="${{ matrix.goos == 'windows' && '.exe' || '' }}"
           mkdir -p "${OUT}"
 
-          VERSION="${GITHUB_REF#refs/tags/}"
+          CGO_ENABLED=1 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -ldflags "-X github.com/feloex/GoogleTakeoutFixer/internal/version.Tag=${VERSION} -s -w${{ matrix.goos == 'windows' && ' -H=windowsgui' || '' }}" \
+            -o "${OUT}/${APP_NAME}${EXT}" ./cmd/main.go
 
-          CGO_ENABLED=1 go build -ldflags "-X github.com/feloex/GoogleTakeoutFixer/internal/version.Tag=${VERSION} -s -w" -o "${OUT}/${APP_NAME}" ./cmd/main.go
-
-          ET_VERSION="$(curl -fsSL --retry 3 https://exiftool.org/ver.txt | tr -d '[:space:]')"
-          curl -fsSL --retry 3 -o et.tgz "https://exiftool.org/Image-ExifTool-${ET_VERSION}.tar.gz"
-          tar xf et.tgz
-          cp "Image-ExifTool-${ET_VERSION}/exiftool" "${OUT}/"
-          cp -r "Image-ExifTool-${ET_VERSION}/lib" "${OUT}/"
-          chmod +x "${OUT}/exiftool"
+          ET_VERSION=$(curl -fsSL --retry 3 https://exiftool.org/ver.txt | tr -d '[:space:]')
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            curl -fsSL --retry 3 -o et.zip "https://exiftool.org/exiftool-${ET_VERSION}_64.zip"
+            unzip -q et.zip
+            mv "$(find . -maxdepth 3 -name 'exiftool(-k).exe' | head -1)" "${OUT}/exiftool.exe"
+            find . -maxdepth 3 -type d -name 'exiftool_files' -exec cp -r {} "${OUT}/" \; 2>/dev/null || true
+          else
+            curl -fsSL --retry 3 -o et.tgz "https://exiftool.org/Image-ExifTool-${ET_VERSION}.tar.gz"
+            tar xf et.tgz
+            cp "Image-ExifTool-${ET_VERSION}/exiftool" "${OUT}/"
+            cp -r "Image-ExifTool-${ET_VERSION}/lib" "${OUT}/"
+            chmod +x "${OUT}/exiftool"
+            printf '#!/usr/bin/env bash\ncd "$(dirname "$0")"\nexec ./%s "$@"\n' "${APP_NAME}" > "${OUT}/run.sh"
+            chmod +x "${OUT}/run.sh"
+          fi
 
           cp LICENSE "${OUT}/LICENSE.txt"
           [ -f README.md ] && cp README.md "${OUT}/README.md"
 
-          printf '#!/usr/bin/env bash\ncd "$(dirname "$0")"\nexec ./%s "$@"\n' "${APP_NAME}" > "${OUT}/run.sh"
-          chmod +x "${OUT}/run.sh"
-
-          tar czf "${OUT}.tar.gz" "${OUT}"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: asset-linux
-          path: ${{ env.APP_NAME }}_Linux_x64.tar.gz
-
-
-  build-windows:
-    name: Build Windows x64
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64 zip
-
-      - name: Build & Bundle
-        run: |
-          set -euo pipefail
-          OUT="${APP_NAME}_Windows_x64"
-          mkdir -p "${OUT}"
-
-          VERSION="${GITHUB_REF#refs/tags/}"
-
-          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc \
-            go build -ldflags "-X github.com/feloex/GoogleTakeoutFixer/internal/version.Tag=${VERSION} -s -w -H=windowsgui" -o "${OUT}/${APP_NAME}.exe" ./cmd/main.go
-
-          ET_VERSION="$(curl -fsSL --retry 3 https://exiftool.org/ver.txt | tr -d '[:space:]')"
-          curl -fsSL --retry 3 -o et.zip "https://exiftool.org/exiftool-${ET_VERSION}_64.zip"
-          unzip -q et.zip
-          mv "$(find . -maxdepth 3 -name 'exiftool(-k).exe' | head -1)" "${OUT}/exiftool.exe"
-          find . -maxdepth 3 -type d -name 'exiftool_files' -exec cp -r {} "${OUT}/" \; 2>/dev/null || true
-
-          cp LICENSE "${OUT}/LICENSE.txt"
-          [ -f README.md ] && cp README.md "${OUT}/README.md"
-
-          zip -r "${OUT}.zip" "${OUT}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            zip -r "${OUT}.zip" "${OUT}"
+          else
+            tar czf "${OUT}.tar.gz" "${OUT}"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: asset-windows
-          path: ${{ env.APP_NAME }}_Windows_x64.zip
+          name: asset-${{ matrix.name }}
+          path: ${{ env.APP_NAME }}_${{ matrix.name }}.${{ matrix.archive }}
 
 
   build-macos:
@@ -109,12 +110,12 @@ jobs:
           go-version-file: go.mod
 
       - name: Build & Bundle
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           OUT="${APP_NAME}_macOS_universal"
           mkdir -p "${OUT}"
-
-          VERSION="${GITHUB_REF#refs/tags/}"
 
           CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
             go build -ldflags "-X github.com/feloex/GoogleTakeoutFixer/internal/version.Tag=${VERSION} -s -w" -o bin_arm64 ./cmd/main.go
@@ -124,7 +125,7 @@ jobs:
           lipo -create -output "${OUT}/${APP_NAME}" bin_arm64 bin_amd64
           chmod +x "${OUT}/${APP_NAME}"
 
-          ET_VERSION="$(curl -fsSL --retry 3 https://exiftool.org/ver.txt | tr -d '[:space:]')"
+          ET_VERSION=$(curl -fsSL --retry 3 https://exiftool.org/ver.txt | tr -d '[:space:]')
           curl -fsSL --retry 3 -o et.tgz "https://exiftool.org/Image-ExifTool-${ET_VERSION}.tar.gz"
           tar xf et.tgz
           cp "Image-ExifTool-${ET_VERSION}/exiftool" "${OUT}/"
@@ -133,7 +134,6 @@ jobs:
 
           cp LICENSE "${OUT}/LICENSE.txt"
           [ -f README.md ] && cp README.md "${OUT}/README.md"
-
           tar czf "${OUT}.tar.gz" "${OUT}"
 
       - uses: actions/upload-artifact@v4
@@ -144,8 +144,8 @@ jobs:
 
   release:
     name: Release
+    needs: [build, build-macos]
     runs-on: ubuntu-latest
-    needs: [build-linux, build-windows, build-macos]
     steps:
       - uses: actions/download-artifact@v4
         with:
