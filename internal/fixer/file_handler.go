@@ -24,7 +24,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // All media extension to differ between media files and other files
@@ -220,4 +222,57 @@ func CountProcessableFiles(sourcePath string) (int, error) {
 		return 0, fmt.Errorf("no media files found in folder structure")
 	}
 	return count, nil
+}
+
+// Detect the month of a file based on its sidecar metadata
+// Returns the month as an integer between 1 and 12
+func DetectFileMonth(sourcePath string, sidecarPath string) (int, error) {
+	if sidecarPath != "" {
+		metadata, err := ReadJsonMetadata(sidecarPath)
+		if err != nil {
+			return 0, err
+		}
+
+		timestamp, err := strconv.ParseInt(metadata.PhotoTakenTime.Timestamp, 10, 64)
+		if err != nil {
+			return 0, err
+		}
+
+		return int(time.Unix(timestamp, 0).Month()), nil
+	}
+
+	fileInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return 0, err
+	}
+
+	return int(fileInfo.ModTime().Month()), nil
+}
+
+func ResolveOutputDir(
+	fixerCtx *FixerContext,
+	sourcePath string,
+	sidecarPath string,
+	sourceDirName string,
+	isYearFolder bool,
+) (string, error) {
+	if fixerCtx.Options.Flatten {
+		return fixerCtx.OutputRoot, nil
+	}
+
+	targetDir := fixerCtx.OutputRoot
+	if sourceDirName != "" /*&& !fixerCtx.Options.IgnoreAlbums && !isYearFolder*/ {
+		targetDir = filepath.Join(targetDir, sourceDirName)
+	}
+
+	if !fixerCtx.Options.MonthSubfolders {
+		return targetDir, nil
+	}
+
+	month, err := DetectFileMonth(sourcePath, sidecarPath)
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(targetDir, strconv.Itoa(month)), nil
 }
