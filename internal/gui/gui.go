@@ -146,6 +146,14 @@ func Main() {
 		inputButton.Disable()
 		outputButton.Disable()
 		startButton.Disable()
+
+		useLinksCheckbox.Disable()
+		writeMetadataCheckbox.Disable()
+		ignoreAlbumsCheckbox.Disable()
+		monthSubfoldersCheckbox.Disable()
+		flattenCheckbox.Disable()
+		restoreMOVExtensionCheckbox.Disable()
+
 		fixer.Log(fixer.LoggerInfo, "Processing...")
 		progressBar.SetValue(0)
 
@@ -203,6 +211,13 @@ func Main() {
 				inputButton.Enable()
 				outputButton.Enable()
 				startButton.Enable()
+
+				// Manually re-enable restoreMOVExtensionCheckbox and writeMetadataCheckbox
+				// since they are not affected by other checboxes in updateCheckboxStates
+				restoreMOVExtensionCheckbox.Enable()
+				writeMetadataCheckbox.Enable()
+				// Re-enable checboxes based on current states
+				updateCheckboxStates()
 			})
 		}()
 	})
