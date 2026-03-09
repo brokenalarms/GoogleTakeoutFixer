@@ -88,6 +88,7 @@ func Process(
 	startTime := time.Now()
 	defer func() {
 		Log(LoggerInfo, "Total processing time: %s", time.Since(startTime).Round(time.Second))
+		ClearCache()
 	}()
 
 	defer close(progressCh)
@@ -354,9 +355,15 @@ func CreateFixedFile(
 	destPath string,
 	isYearFolder bool,
 ) error {
-	// Ensure output directory exists
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-		return err
+	// Ensure output directory exists (create if not)
+	destDir := filepath.Dir(destPath)
+	if _, err := os.Stat(destDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			return err
+		}
+
+		// Invalidate OutputRoot cache so newly created year folders are visible for symlinks
+		ClearCacheDir(fixerCtx.OutputRoot)
 	}
 
 	fileName := filepath.Base(destPath)
@@ -371,8 +378,7 @@ func CreateFixedFile(
 		}
 
 		// Attempt to find the file inside of any year folder in the output
-		// TODO: Make this more efficient, whole output directory is being searched every time
-		entries, _ := os.ReadDir(fixerCtx.OutputRoot)
+		entries, _ := ReadDirCached(fixerCtx.OutputRoot)
 		for _, curEntry := range entries {
 			if !curEntry.IsDir() {
 				continue

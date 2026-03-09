@@ -26,8 +26,59 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+// Cache for diectory entries to prevent excessive disk reads (issue #5)
+var (
+	dirCache     = make(map[string][]os.DirEntry)
+	dirCacheLock sync.RWMutex
+)
+
+// ReadDirCached returns cached directories or reads them it not present
+func ReadDirCached(dir string) ([]os.DirEntry, error) {
+	dirCacheLock.RLock()
+	entries, ok := dirCache[dir]
+	dirCacheLock.RUnlock()
+
+	// Cache hit, return entries
+	if ok {
+		return entries, nil
+	}
+
+	dirCacheLock.Lock()
+	defer dirCacheLock.Unlock()
+
+	// Check again in case it was created while waiting for lock
+	if entries, ok = dirCache[dir]; ok {
+		return entries, nil
+	}
+
+	// Read directory and cache results
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	dirCache[dir] = entries
+
+	return entries, nil
+}
+
+// ClearCache clears the directory cache for all paths
+func ClearCache() {
+	dirCacheLock.Lock()
+	defer dirCacheLock.Unlock()
+	// Reallocate map to clear everything
+	dirCache = make(map[string][]os.DirEntry)
+}
+
+// ClearCacheDir clears the directory cache for a specific path
+func ClearCacheDir(dir string) {
+	dirCacheLock.Lock()
+	defer dirCacheLock.Unlock()
+	delete(dirCache, dir)
+}
 
 // All media extension to differ between media files and other files
 var imageExtensions = map[string]struct{}{
@@ -95,7 +146,7 @@ func FindSidecar(imagePath string) (string, error) {
 	base := strings.TrimSuffix(filepath.Base(imagePath), filepath.Ext(imagePath))
 	prefix := strings.ToLower(base)
 
-	entries, err := os.ReadDir(dir)
+	entries, err := ReadDirCached(dir)
 	if err != nil {
 		return "", err
 	}
