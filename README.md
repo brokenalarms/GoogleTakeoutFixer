@@ -67,6 +67,7 @@ To use GoogleTakeoutFixer, you must have downloaded your photos from Google Take
     - **"Ignore album folders"**: Ignores album folders and only processes year folders.
     - **"Create month subfolders"**: Creates month subfolders (labeled 1-12) inside of the output folders.
     - **"Flatten output structure"**: Puts all files directly in the output folder.
+    - **"Restore .MOV file extension"**: Restores .MOV file extension in case the Major Brand EXIF field says "Apple QuickTime (.MOV/QT)" (See #2).
 5. Click **"Start processing"** and wait for the process to finish. The time it takes depends on the number of photos and videos you have.
 
 Once the process is complete, you can find your fixed files in the output folder you selected.
@@ -84,6 +85,7 @@ You can also use GoogleTakeoutFixer through the CLI. Use the following flags:
 - `--ignore-albums`: Ignore album folders and only process year folders
 - `--month-subfolders`: Create month subfolders (labeled 1-12) inside of folders
 - `--flatten`: Flatten the folder structure and put all files directly in the output folder
+- `--restore-mov`: Restore .MOV file extension in case the Major Brand EXIF field says \"Apple QuickTime (.MOV/QT)\" (See #2)
 - `--version`: Show version
 - `--help`: Show help message
 
