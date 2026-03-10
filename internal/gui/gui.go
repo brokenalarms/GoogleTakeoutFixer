@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -50,7 +51,7 @@ func Main() {
 	var monthSubfolders bool = false
 	var restoreMOVExtension bool = false
 
-	progressLabel := widget.NewLabel("")
+	progressLabel := widget.NewLabel("Ready to start")
 	progressLabel.Truncation = fyne.TextTruncateEllipsis
 	progressBar := widget.NewProgressBar()
 	var cancelFn context.CancelFunc
@@ -184,27 +185,46 @@ func Main() {
 		// Update progress
 
 		go func() {
-			for p := range progressCh {
-				percentage := 0.0
-				if p.Total > 0 {
-					percentage = (float64(p.Processed) / float64(p.Total)) * 100.0
-				}
+			var lastUpdate time.Time
+			var lastP fixer.Progress
 
-				fyne.Do(func() {
-					progressBar.Max = float64(p.Total)
-					progressBar.SetValue(float64(p.Processed))
-					progressLabel.SetText(fmt.Sprintf("[%.2f%%] %d/%d - %s",
-						percentage, p.Processed, p.Total, filepath.Base(p.Current)))
-				})
+			for p := range progressCh {
+				lastP = p
+				if time.Since(lastUpdate) >= 100*time.Millisecond {
+					lastUpdate = time.Now()
+
+					percentage := 0.0
+					if p.Total > 0 {
+						percentage = (float64(p.Processed) / float64(p.Total)) * 100.0
+					}
+
+					text := fmt.Sprintf("[%.2f%%] %d/%d - %s", percentage, p.Processed, p.Total, filepath.Base(p.Current))
+					processed, total := float64(p.Processed), float64(p.Total)
+
+					fyne.Do(func() {
+						progressBar.Max = total
+						progressBar.SetValue(processed)
+						progressLabel.SetText(text)
+					})
+				}
 			}
 
 			// Processing complete
 			fyne.Do(func() {
+				if lastP.Total > 0 {
+					progressBar.Max = float64(lastP.Total)
+					progressBar.SetValue(float64(lastP.Total))
+				}
+
 				if ctx.Err() != nil {
 					fixer.Log(fixer.LoggerInfo, "Cancelled")
+					progressLabel.SetText("Cancelled")
 				} else {
+					fixer.Log(fixer.LoggerInfo, "Detailed logs are saved in the ./logs folder")
 					fixer.Log(fixer.LoggerInfo, "Done")
-					progressBar.SetValue(progressBar.Max)
+
+					progressLabel.SetText(fmt.Sprintf("Finished processing %d files", lastP.Processed))
+					fixer.Log(fixer.LoggerInfo, "%s", fmt.Sprintf("Finished processing %d files", lastP.Processed))
 				}
 				cancelButton.Disable()
 				cancelFn = nil
@@ -248,25 +268,40 @@ func Main() {
 		logUpdating = false
 	}
 
+	logCh := make(chan string, 1000)
 	fixer.LogHandler = func(level fixer.LogLevel, message string) {
-		logMsg := fmt.Sprintf("[%s] %s", level, message)
-		fyne.Do(func() {
-			visibleLogLines = append(visibleLogLines, logMsg)
-			if len(visibleLogLines) > maxVisibleLogLines {
-				visibleLogLines = visibleLogLines[len(visibleLogLines)-maxVisibleLogLines:]
-			}
-
-			logUpdating = true
-			logEntry.SetText(strings.Join(visibleLogLines, "\n") + "\n")
-			logUpdating = false
-			logEntry.CursorRow = len(visibleLogLines)
-			logEntry.CursorColumn = 0
-			logEntry.Refresh()
-		})
+		logCh <- fmt.Sprintf("[%s] %s", level, message)
 	}
 
-	/*visibleLogLines = append(visibleLogLines, "Logs will appear here...")
-	logEntry.SetText("Logs will appear here...\n")*/
+	// Throttle log updates to the UI using a channel
+	go func() {
+		for logMsg := range logCh {
+			newLogs := []string{logMsg}
+
+			// Group remaining logs
+			for len(logCh) > 0 {
+				newLogs = append(newLogs, <-logCh)
+			}
+
+			fyne.Do(func() {
+				visibleLogLines = append(visibleLogLines, newLogs...)
+				if len(visibleLogLines) > maxVisibleLogLines {
+					visibleLogLines = visibleLogLines[len(visibleLogLines)-maxVisibleLogLines:]
+				}
+
+				logUpdating = true
+				logEntry.SetText(strings.Join(visibleLogLines, "\n") + "\n")
+				logUpdating = false
+
+				logEntry.CursorRow = len(visibleLogLines)
+				logEntry.CursorColumn = 0
+				logEntry.Refresh()
+			})
+
+			// Wait to collect more logs
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
 
 	fixer.Log(fixer.LoggerInfo, "Logs will appear here...")
 
@@ -298,7 +333,7 @@ func Main() {
 		OptionsSeparator,
 		StartCancelRow,
 		progressBar,
-		//progressLabel,
+		progressLabel,
 	)
 
 	w.SetContent(container.NewBorder(
@@ -306,6 +341,7 @@ func Main() {
 		nil,
 		nil,
 		nil,
+		//logEntry, // expand
 		logEntry, // expand
 	))
 
