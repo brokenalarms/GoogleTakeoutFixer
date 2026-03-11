@@ -54,6 +54,23 @@ func Main() {
 		return
 	}
 
+	if *flatten && *useSymlinks {
+		fmt.Println("Error: --flatten and --symlink cannot be used together")
+		os.Exit(1)
+	}
+	if *flatten && *ignoreAlbums {
+		fmt.Println("Error: --flatten and --ignore-albums cannot be used together")
+		os.Exit(1)
+	}
+	if *flatten && *monthSubfolders {
+		fmt.Println("Error: --flatten and --month-subfolders cannot be used together")
+		os.Exit(1)
+	}
+	if *useSymlinks && *ignoreAlbums {
+		fmt.Println("Error: --symlink and --ignore-albums cannot be used together")
+		os.Exit(1)
+	}
+
 	if *inputPath == "" || *outputPath == "" {
 		fmt.Println("Error: --input and --output are required")
 		flag.Usage()
