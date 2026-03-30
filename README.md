@@ -105,5 +105,11 @@ You might have to give the executable permissions to run on Linux and macOS usin
 ## Credits
 This project modifies metadata using the [ExifTool](https://exiftool.org/) library by **Phil Harvey**. ExifTool is licensed under the Perl Artistic license, or the GNU General Public License (see [here](https://exiftool.org/#license) for more details).
 
+## Donate
+This software is completely free. You are free to use, modify, and distribute it. If you'd like to support my work, you can donate via my monero adress. Remember that donating is completely optional.
+Please consider supporting other open-source projects.
+
+XMR: ``86ApiK5RFKeVsaEDreQvvkE5Mdo6p3xwtGAZTcbf7JKFDnJ4bG52zqsZjAzgFW6prWhfarinBLrCpW8faxKotG26RcRD4fQ``
+
 ## Disclaimer
 Not affiliated with Google LLC.
