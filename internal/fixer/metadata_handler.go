@@ -154,8 +154,6 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 		"-AllDates=" + exifTimeWithTZ,
 		"-TrackCreateDate=" + exifTimeWithTZ,
 		"-MediaCreateDate=" + exifTimeWithTZ,
-		"-FileCreateDate=" + exifTimeWithTZ,
-		"-FileModifyDate=" + exifTimeWithTZ,
 		"-OffsetTime=" + offsetStr,
 		"-OffsetTimeOriginal=" + offsetStr,
 		"-OffsetTimeDigitized=" + offsetStr,
@@ -227,11 +225,22 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 		return fmt.Errorf("Failed to read from exiftool: %v", err)
 	}
 
-	// Set the file system modification time to match
-	if err := os.Chtimes(filePath, utcTime, utcTime); err != nil {
-		return fmt.Errorf("failed to set file timestamps: %v", err)
+	// Set file birth time (creation date) using macOS SetFile
+	if runtime.GOOS == "darwin" {
+		if err := SetFileBirthTime(filePath, localTime); err != nil {
+			Log(LoggerWarn, "Failed to set birth time for %s: %v", filePath, err)
+		}
 	}
 
+	return nil
+}
+
+func SetFileBirthTime(filePath string, t time.Time) error {
+	setfileFormat := t.Format("01/02/2006 15:04:05")
+	cmd := exec.Command("SetFile", "-d", setfileFormat, filePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("SetFile failed: %v, output: %s", err, string(output))
+	}
 	return nil
 }
 
