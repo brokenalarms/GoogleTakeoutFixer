@@ -244,6 +244,61 @@ func FindImagePartner(videoPath string) (string, error) {
 	return "", nil
 }
 
+// FindSourceRoots returns directories that contain the expected Google Photos
+// folder structure (subdirectories with media files). If the given path already
+// has that structure, it returns just that path. Otherwise it looks one level
+// deeper to support pointing at a directory of multiple takeout exports.
+func FindSourceRoots(path string) ([]string, error) {
+	if dirHasMediaSubdirs(path) {
+		return []string{path}, nil
+	}
+
+	subdirs, err := DiscoverDirs(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var roots []string
+	for _, sub := range subdirs {
+		child := filepath.Join(path, sub.Name())
+		if dirHasMediaSubdirs(child) {
+			roots = append(roots, child)
+		} else {
+			grandchildren, _ := DiscoverDirs(child)
+			for _, gc := range grandchildren {
+				gcPath := filepath.Join(child, gc.Name())
+				if dirHasMediaSubdirs(gcPath) {
+					roots = append(roots, gcPath)
+				}
+			}
+		}
+	}
+
+	if len(roots) == 0 {
+		return nil, fmt.Errorf("no media files found in folder structure")
+	}
+	return roots, nil
+}
+
+func dirHasMediaSubdirs(path string) bool {
+	subdirs, err := DiscoverDirs(path)
+	if err != nil {
+		return false
+	}
+	for _, sub := range subdirs {
+		files, err := os.ReadDir(filepath.Join(path, sub.Name()))
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if !f.IsDir() && IsMediaFile(f.Name()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Counts all processable files in the source path
 func CountProcessableFiles(sourcePath string) (int, error) {
 	fileInfo, err := os.Stat(sourcePath)
@@ -255,17 +310,23 @@ func CountProcessableFiles(sourcePath string) (int, error) {
 		return 0, fmt.Errorf("source path is not a directory")
 	}
 
-	count := 0
-	subdirs, err := DiscoverDirs(sourcePath)
+	roots, err := FindSourceRoots(sourcePath)
 	if err != nil {
 		return 0, err
 	}
 
-	for _, dir := range subdirs {
-		files, _ := os.ReadDir(filepath.Join(sourcePath, dir.Name()))
-		for _, file := range files {
-			if !file.IsDir() && IsMediaFile(file.Name()) {
-				count++
+	count := 0
+	for _, root := range roots {
+		subdirs, err := DiscoverDirs(root)
+		if err != nil {
+			continue
+		}
+		for _, dir := range subdirs {
+			files, _ := os.ReadDir(filepath.Join(root, dir.Name()))
+			for _, file := range files {
+				if !file.IsDir() && IsMediaFile(file.Name()) {
+					count++
+				}
 			}
 		}
 	}

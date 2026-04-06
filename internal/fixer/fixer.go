@@ -131,29 +131,41 @@ func Process(
 	// process all directories in the source directory, ignore files in the source directory itself
 	// because all media files should be inside of sub-folders
 	if fileInfo.IsDir() {
-		dirs, err := DiscoverDirs(sourcePath)
+		roots, err := FindSourceRoots(sourcePath)
 		if err != nil {
-			Log(LoggerError, "Error discovering directories: %v", err)
+			Log(LoggerError, "Error finding source roots: %v", err)
+			return err
 		}
 
-		for _, dir := range dirs {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
+		for _, root := range roots {
+			fixerCtx.SourceRoot = root
+			Log(LoggerInfo, "Processing source root: %s", root)
 
-			dirPath := filepath.Join(sourcePath, dir.Name())
-			var targetPath string = filepath.Join(outputPath, dir.Name())
-
-			isYearFolder, err := IsYearFolder(dir.Name())
+			dirs, err := DiscoverDirs(root)
 			if err != nil {
-				Log(LoggerWarn, "Failed to determine if folder is a year folder for %s: %v", dir.Name(), err)
-			}
-			if (options.IgnoreAlbums || options.Flatten) && !isYearFolder {
-				Log(LoggerInfo, "Skipping album folder: %s", dir.Name())
+				Log(LoggerError, "Error discovering directories in %s: %v", root, err)
 				continue
 			}
 
-			p = ProcessDirectory(fixerCtx, dirPath, targetPath, isYearFolder, p)
+			for _, dir := range dirs {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+
+				dirPath := filepath.Join(root, dir.Name())
+				var targetPath string = filepath.Join(outputPath, dir.Name())
+
+				isYearFolder, err := IsYearFolder(dir.Name())
+				if err != nil {
+					Log(LoggerWarn, "Failed to determine if folder is a year folder for %s: %v", dir.Name(), err)
+				}
+				if (options.IgnoreAlbums || options.Flatten) && !isYearFolder {
+					Log(LoggerInfo, "Skipping album folder: %s", dir.Name())
+					continue
+				}
+
+				p = ProcessDirectory(fixerCtx, dirPath, targetPath, isYearFolder, p)
+			}
 		}
 	} else {
 		err = ProcessFile(fixerCtx, sourcePath, "", false)
