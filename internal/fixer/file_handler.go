@@ -241,7 +241,10 @@ func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
 	}
 
 	// --- Phase 3: If still not found, check the corresponding "Photos from YYYY" folder ---
-	year := extractYearFromFileName(fileName)
+	var year string
+	if t, ok := parseDateFromFileName(fileName); ok {
+		year = strconv.Itoa(t.Year())
+	}
 	if year != "" && fixerCtx != nil {
 		yearFolderNames := []string{"Photos from " + year, year}
 		for _, yearFolderName := range yearFolderNames {
@@ -264,17 +267,40 @@ func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
 	return "", nil
 }
 
-func extractYearFromFileName(fileName string) string {
-	if strings.HasPrefix(fileName, "PXL_") || strings.HasPrefix(fileName, "IMG_") {
-		if len(fileName) >= 8 {
-			return fileName[4:8]
-		}
+const dateSep = `[-:._]?`
+const dateTimeSep = `[-:._ ]?`
+
+var dateTimeRe = regexp.MustCompile(
+	`(?:^|[^0-9])` +
+		`(\d{4})` + dateSep + `(\d{2})` + dateSep + `(\d{2})` +
+		`(?:` + dateTimeSep + `(\d{2})` + dateSep + `(\d{2})` + dateSep + `(\d{2}))?`,
+)
+
+func parseDateFromFileName(fileName string) (time.Time, bool) {
+	name := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+
+	m := dateTimeRe.FindStringSubmatch(name)
+	if m == nil {
+		return time.Time{}, false
 	}
-	re := regexp.MustCompile(`^(19|20)\d{2}-\d{2}-\d{2}`)
-	if re.MatchString(fileName) {
-		return fileName[0:4]
+
+	year, _ := strconv.Atoi(m[1])
+	month, _ := strconv.Atoi(m[2])
+	day, _ := strconv.Atoi(m[3])
+
+	if year < 1970 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31 {
+		return time.Time{}, false
 	}
-	return ""
+
+	hour, min, sec := 0, 0, 0
+	if m[4] != "" {
+		hour, _ = strconv.Atoi(m[4])
+		min, _ = strconv.Atoi(m[5])
+		sec, _ = strconv.Atoi(m[6])
+	}
+
+	t := time.Date(year, time.Month(month), day, hour, min, sec, 0, time.UTC)
+	return t, true
 }
 
 // Checks if the file at the given path has the specified extension
