@@ -298,7 +298,10 @@ func ProcessFile(
 
 	if fixerCtx.Options.AppendDateToFilename {
 		if fileDate, err := DetectFileDate(sourcePath, sidecarPath); err == nil {
-			dateSuffix := fileDate.Format("2006-01-02 15.04")
+			dateSuffix := fileDate.Format("2006-01-02")
+			if fileDate.Hour() != 0 || fileDate.Minute() != 0 || fileDate.Second() != 0 {
+				dateSuffix += fileDate.Format(" 15.04.05")
+			}
 			ext := filepath.Ext(fileName)
 			base := strings.TrimSuffix(fileName, ext)
 			if !strings.Contains(base, dateSuffix[:10]) {

@@ -645,9 +645,13 @@ func ResolveOutputDir(
 		return targetDir, nil
 	}
 
-	if fixerCtx.Options.DateFolders {
-		return filepath.Join(targetDir, fileDate.Format("2006-01-02")), nil
+	if fixerCtx.Options.MonthSubfolders {
+		targetDir = filepath.Join(targetDir, fmt.Sprintf("%02d", int(fileDate.Month())))
 	}
 
-	return filepath.Join(targetDir, fmt.Sprintf("%02d", int(fileDate.Month()))), nil
+	if fixerCtx.Options.DateFolders {
+		targetDir = filepath.Join(targetDir, fileDate.Format("2006-01-02"))
+	}
+
+	return targetDir, nil
 }

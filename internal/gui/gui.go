@@ -99,9 +99,12 @@ func Main() {
 		fmt.Println("ignore albums", ignoreAlbums)
 	})
 
+	dateFoldersCheckbox := widget.NewCheck("Day subfolders (YYYY-MM-DD)", func(value bool) {
+		dateFolders = value
+	})
+
 	monthSubfoldersCheckbox := widget.NewCheck("Create month subfolders", func(value bool) {
 		monthSubfolders = value
-		fmt.Println("month subfolders", monthSubfolders)
 	})
 
 	flattenCheckbox := widget.NewCheck("Flatten album structure", func(value bool) {
@@ -112,10 +115,6 @@ func Main() {
 	restoreMOVExtensionCheckbox := widget.NewCheck("Restore .MOV file extension", func(value bool) {
 		restoreMOVExtension = value
 		fmt.Println("restore MOV extension", restoreMOVExtension)
-	})
-
-	dateFoldersCheckbox := widget.NewCheck("Date folders (YYYY-MM-DD)", func(value bool) {
-		dateFolders = value
 	})
 
 	appendDateCheckbox := widget.NewCheck("Append date to filename", func(value bool) {
@@ -383,8 +382,8 @@ func Main() {
 		ignoreAlbumsCheckbox,
 		monthSubfoldersCheckbox,
 		flattenCheckbox,
-		restoreMOVExtensionCheckbox,
 		dateFoldersCheckbox,
+		restoreMOVExtensionCheckbox,
 		appendDateCheckbox,
 	)
 
@@ -395,12 +394,12 @@ func Main() {
 
 	StartCancelRow := container.NewGridWithColumns(2, startButton, cancelButton)
 
-	FolderSeperator := container.NewPadded(widget.NewSeparator())
+	OutputSeparator := container.NewPadded(widget.NewSeparator())
 	OptionsSeparator := container.NewPadded(widget.NewSeparator())
 
 	topContent := container.NewVBox(
 		folderButtons,
-		FolderSeperator,
+		OutputSeparator,
 		CheckBoxRow,
 		filenameTimestampGroup,
 		OptionsSeparator,
