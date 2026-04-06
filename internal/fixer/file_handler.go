@@ -287,10 +287,6 @@ func DetectFileMonth(sourcePath string, sidecarPath string) (int, error) {
 		}
 	}
 
-	if exifDate, err := ReadExifDate(sourcePath); err == nil {
-		return int(exifDate.Month()), nil
-	}
-
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		return 0, err
