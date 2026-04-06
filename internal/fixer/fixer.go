@@ -142,7 +142,6 @@ func Process(
 			}
 
 			dirPath := filepath.Join(sourcePath, dir.Name())
-			var targetPath string = filepath.Join(outputPath, dir.Name())
 
 			isYearFolder, err := IsYearFolder(dir.Name())
 			if err != nil {
@@ -152,6 +151,12 @@ func Process(
 				Log(LoggerInfo, "Skipping album folder: %s", dir.Name())
 				continue
 			}
+
+			outputDirName := dir.Name()
+			if isYearFolder {
+				outputDirName = ExtractYearFromFolder(dir.Name())
+			}
+			targetPath := filepath.Join(outputPath, outputDirName)
 
 			p = ProcessDirectory(fixerCtx, dirPath, targetPath, isYearFolder, p)
 		}

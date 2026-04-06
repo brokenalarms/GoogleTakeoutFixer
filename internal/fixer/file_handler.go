@@ -167,36 +167,35 @@ func IsNameExtension(extension string, path string) bool {
 	return strings.EqualFold(filepath.Ext(path), extension)
 }
 
+// Year folder prefixes of some countries
+// yearPrefixes is mostly made by AI. I have not verified these, but i assume they are primarily correct.
+// Please create an issue if you find any mistakes or if you want to add more languages.
+var yearPrefixes = []string{
+	"Photos from ",     // English
+	"Fotos von ",       // German
+	"Photos de ",       // French
+	"Foto del ",        // Italian
+	"Fotos de ",        // Spanish / Portuguese
+	"Foto's van ",      // Dutch
+	"Zdjęcia z ",       // Polish
+	"Фотографии из ",   // Russian
+	"Foton från ",      // Swedish
+	"Bilder fra ",      // Norwegian
+	"Billeder fra ",    // Danish
+	"Fotoğraflar ",     // Turkish
+	"Fotografie z ",    // Czech
+	"Fotók a ",         // Hungarian
+	"Φωτογραφίες από ", // Greek
+	"Fotografii din ",  // Romanian
+	"Foto dari ",       // Indonesian
+	"รูปภาพจาก ",       // Thai
+	"Ảnh từ ",          // Vietnamese
+}
+
 // Checks whether a directory is a standart google year folder
 func IsYearFolder(dirPath string) (bool, error) {
-	// Year folder prefixes of some countries
-	// yearPrefixes is mostly made by AI. I have not verified these, but i assume they are primarily correct.
-	// Please create an issue if you find any mistakes or if you want to add more languages.
-	yearPrefixes := []string{
-		"Photos from ",     // English
-		"Fotos von ",       // German
-		"Photos de ",       // French
-		"Foto del ",        // Italian
-		"Fotos de ",        // Spanish / Portuguese
-		"Foto's van ",      // Dutch
-		"Zdjęcia z ",       // Polish
-		"Фотографии из ",   // Russian
-		"Foton från ",      // Swedish
-		"Bilder fra ",      // Norwegian
-		"Billeder fra ",    // Danish
-		"Fotoğraflar ",     // Turkish
-		"Fotografie z ",    // Czech
-		"Fotók a ",         // Hungarian
-		"Φωτογραφίες από ", // Greek
-		"Fotografii din ",  // Romanian
-		"Foto dari ",       // Indonesian
-		"รูปภาพจาก ",       // Thai
-		"Ảnh từ ",          // Vietnamese
-	}
-
 	for _, prefix := range yearPrefixes {
 		if strings.HasPrefix(dirPath, prefix) {
-			// The rest of the string has to be 4 characters long
 			yearPart := strings.TrimPrefix(dirPath, prefix)
 			if matched, _ := regexp.MatchString(`^\d{4}$`, yearPart); matched {
 				return true, nil
@@ -204,6 +203,19 @@ func IsYearFolder(dirPath string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// Extracts the year string from a year folder name by stripping the localized prefix
+func ExtractYearFromFolder(dirName string) string {
+	for _, prefix := range yearPrefixes {
+		if strings.HasPrefix(dirName, prefix) {
+			yearPart := strings.TrimPrefix(dirName, prefix)
+			if matched, _ := regexp.MatchString(`^\d{4}$`, yearPart); matched {
+				return yearPart
+			}
+		}
+	}
+	return dirName
 }
 
 // Checks whether a file, that is provided using its path, is a media file
