@@ -322,12 +322,7 @@ func ProcessFile(
 		return err
 	}
 
-	destPath := filepath.Join(outputDir, fileName)
-
-	if _, err := os.Stat(destPath); err == nil {
-		Log(LoggerInfo, "File %s already exists, skipping", destPath)
-		return nil
-	}
+	destPath := deduplicatePath(filepath.Join(outputDir, fileName))
 
 	// Metadata sidecar file not found, copy the file without metadata
 	if sidecarPath == "" {
