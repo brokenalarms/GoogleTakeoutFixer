@@ -102,6 +102,23 @@ func IsVideoFile(path string) bool {
 	return ok
 }
 
+func deduplicatePath(path string) string {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return path
+	}
+
+	dir := filepath.Dir(path)
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(filepath.Base(path), ext)
+
+	for i := 1; ; i++ {
+		candidate := filepath.Join(dir, fmt.Sprintf("%s-%d%s", base, i, ext))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+}
+
 // Duplicate a file from one path to another
 func DuplicateFile(inputPath string, outputPath string) error {
 	sourceFile, err := os.Open(inputPath)
@@ -139,27 +156,146 @@ func DiscoverDirs(path string) ([]os.DirEntry, error) {
 	return dirList, nil
 }
 
-// Find a matching sidecar JSON
-func FindSidecar(imagePath string) (string, error) {
-	// Scan directory non case sensitively for JSON sidecar files
-	dir := filepath.Dir(imagePath)
-	base := strings.TrimSuffix(filepath.Base(imagePath), filepath.Ext(imagePath))
-	prefix := strings.ToLower(base)
+// Find a matching sidecar JSON by searching in multiple locations.
+func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
+	fileName := filepath.Base(imagePath)
+	Log(LoggerInfo, "FindSidecar: Searching for sidecar for %s", fileName)
 
-	entries, err := ReadDirCached(dir)
+	// Define the core search logic as a closure so we can reuse it.
+	searchLogic := func(dirToSearch string) (string, error) {
+		ext := filepath.Ext(fileName)
+		base := strings.TrimSuffix(fileName, ext)
+
+		entries, err := ReadDirCached(dirToSearch)
+		if err != nil {
+			if os.IsNotExist(err) { // Don't treat a missing folder as a fatal error
+				return "", nil
+			}
+			return "", err
+		}
+
+		targets := make(map[string]struct{})
+		targets[strings.ToLower(fileName+".json")] = struct{}{}
+		targets[strings.ToLower(base+".json")] = struct{}{}
+		targets[strings.ToLower(fileName+".supplemental-metadata.json")] = struct{}{}
+		targets[strings.ToLower(base+".supplemental-metadata.json")] = struct{}{}
+
+		if strings.Contains(base, "(") && strings.HasSuffix(base, ")") {
+			start := strings.LastIndex(base, "(")
+			parenCleanBase := base[:start]
+			parenSuffix := base[start:]
+			targets[strings.ToLower(parenCleanBase+ext+parenSuffix+".json")] = struct{}{}
+			targets[strings.ToLower(base+".json")] = struct{}{}
+		}
+
+		cleanBase := base
+		wasCleaned := false
+		if strings.HasSuffix(cleanBase, "-edited") {
+			cleanBase = strings.TrimSuffix(cleanBase, "-edited")
+			wasCleaned = true
+		}
+		if regexp.MustCompile(`\([0-9]+\)$`).MatchString(cleanBase) {
+			cleanBase = regexp.MustCompile(`\([0-9]+\)$`).ReplaceAllString(cleanBase, "")
+			wasCleaned = true
+		}
+		if regexp.MustCompile(`~[0-9]+$`).MatchString(cleanBase) {
+			cleanBase = regexp.MustCompile(`~[0-9]+$`).ReplaceAllString(cleanBase, "")
+			wasCleaned = true
+		}
+
+		if wasCleaned {
+			targets[strings.ToLower(cleanBase+ext+".json")] = struct{}{}
+			targets[strings.ToLower(cleanBase+".json")] = struct{}{}
+			targets[strings.ToLower(cleanBase+ext+".supplemental-metadata.json")] = struct{}{}
+			targets[strings.ToLower(cleanBase+".supplemental-metadata.json")] = struct{}{}
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				if _, ok := targets[strings.ToLower(entry.Name())]; ok {
+					return filepath.Join(dirToSearch, entry.Name()), nil
+				}
+			}
+		}
+
+		prefix := strings.ToLower(cleanBase)
+		if len(prefix) > 47 {
+			prefix = prefix[:47]
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				lower := strings.ToLower(entry.Name())
+				if strings.HasSuffix(lower, ".json") && strings.HasPrefix(lower, prefix) {
+					return filepath.Join(dirToSearch, entry.Name()), nil
+				}
+			}
+		}
+		return "", nil
+	}
+
+	// --- Phase 1: Search in the same directory as the media file ---
+	currentDir := filepath.Dir(imagePath)
+	sidecarPath, err := searchLogic(currentDir)
 	if err != nil {
 		return "", err
 	}
+	if sidecarPath != "" {
+		Log(LoggerInfo, "FindSidecar: SUCCESS, found sidecar in local directory.")
+		return sidecarPath, nil
+	}
 
-	for _, entry := range entries {
-		name := entry.Name()
-		lower := strings.ToLower(name)
-		if strings.HasPrefix(lower, prefix) && strings.HasSuffix(lower, ".json") {
-			return filepath.Join(dir, name), nil
+	// --- Phase 2: If not found, search in the root of the Google Photos folder ---
+	if fixerCtx != nil && currentDir != fixerCtx.SourceRoot {
+		Log(LoggerInfo, "FindSidecar: Not found locally. Searching in root: %s", fixerCtx.SourceRoot)
+		sidecarPath, err = searchLogic(fixerCtx.SourceRoot)
+		if err != nil {
+			return "", err
+		}
+		if sidecarPath != "" {
+			Log(LoggerInfo, "FindSidecar: SUCCESS, found sidecar in root directory.")
+			return sidecarPath, nil
 		}
 	}
 
+	// --- Phase 3: If still not found, check the corresponding "Photos from YYYY" folder ---
+	year := extractYearFromFileName(fileName)
+	if year != "" && fixerCtx != nil {
+		yearFolderNames := []string{"Photos from " + year, year}
+		for _, yearFolderName := range yearFolderNames {
+			yearFolderPath := filepath.Join(fixerCtx.SourceRoot, yearFolderName)
+			if _, statErr := os.Stat(yearFolderPath); statErr == nil {
+				Log(LoggerInfo, "FindSidecar: Not found. Searching in year folder: %s", yearFolderPath)
+				sidecarPath, err = searchLogic(yearFolderPath)
+				if err != nil {
+					return "", err
+				}
+				if sidecarPath != "" {
+					Log(LoggerInfo, "FindSidecar: SUCCESS, found sidecar in year folder.")
+					return sidecarPath, nil
+				}
+			}
+		}
+	}
+
+	Log(LoggerWarn, "FindSidecar: FAILED to find any sidecar for %s in any location.", fileName)
 	return "", nil
+}
+
+// New helper function to extract year from common Google Photos filename patterns
+func extractYearFromFileName(fileName string) string {
+	// PXL_YYYYMMDD_... or IMG_YYYYMMDD_...
+	if strings.HasPrefix(fileName, "PXL_") || strings.HasPrefix(fileName, "IMG_") {
+		if len(fileName) >= 8 {
+			return fileName[4:8]
+		}
+	}
+	// YYYY-MM-DD ...
+	re := regexp.MustCompile(`^(19|20)\d{2}-\d{2}-\d{2}`)
+	if re.MatchString(fileName) {
+		return fileName[0:4]
+	}
+	// Other patterns can be added here
+	return ""
 }
 
 // Checks if the file at the given path has the specified extension
@@ -167,36 +303,35 @@ func IsNameExtension(extension string, path string) bool {
 	return strings.EqualFold(filepath.Ext(path), extension)
 }
 
-// Checks whether a directory is a standart google year folder
-func IsYearFolder(dirPath string) (bool, error) {
-	// Year folder prefixes of some countries
-	// yearPrefixes is mostly made by AI. I have not verified these, but i assume they are primarily correct.
-	// Please create an issue if you find any mistakes or if you want to add more languages.
-	yearPrefixes := []string{
-		"Photos from ",     // English
-		"Fotos von ",       // German
-		"Photos de ",       // French
-		"Foto del ",        // Italian
-		"Fotos de ",        // Spanish / Portuguese
-		"Foto's van ",      // Dutch
-		"Zdjęcia z ",       // Polish
-		"Фотографии из ",   // Russian
-		"Foton från ",      // Swedish
-		"Bilder fra ",      // Norwegian
-		"Billeder fra ",    // Danish
-		"Fotoğraflar ",     // Turkish
-		"Fotografie z ",    // Czech
-		"Fotók a ",         // Hungarian
-		"Φωτογραφίες από ", // Greek
-		"Fotografii din ",  // Romanian
-		"Foto dari ",       // Indonesian
-		"รูปภาพจาก ",       // Thai
-		"Ảnh từ ",          // Vietnamese
-	}
+// Year folder prefixes of some countries
+// yearPrefixes is mostly made by AI. I have not verified these, but i assume they are primarily correct.
+// Please create an issue if you find any mistakes or if you want to add more languages.
+var yearPrefixes = []string{
+	"Photos from ",     // English
+	"Fotos von ",       // German
+	"Photos de ",       // French
+	"Foto del ",        // Italian
+	"Fotos de ",        // Spanish / Portuguese
+	"Foto's van ",      // Dutch
+	"Zdjęcia z ",       // Polish
+	"Фотографии из ",   // Russian
+	"Foton från ",      // Swedish
+	"Bilder fra ",      // Norwegian
+	"Billeder fra ",    // Danish
+	"Fotoğraflar ",     // Turkish
+	"Fotografie z ",    // Czech
+	"Fotók a ",         // Hungarian
+	"Φωτογραφίες από ", // Greek
+	"Fotografii din ",  // Romanian
+	"Foto dari ",       // Indonesian
+	"รูปภาพจาก ",       // Thai
+	"Ảnh từ ",          // Vietnamese
+}
 
+// Checks whether a directory is a standard google year folder
+func IsYearFolder(dirPath string) (bool, error) {
 	for _, prefix := range yearPrefixes {
 		if strings.HasPrefix(dirPath, prefix) {
-			// The rest of the string has to be 4 characters long
 			yearPart := strings.TrimPrefix(dirPath, prefix)
 			if matched, _ := regexp.MatchString(`^\d{4}$`, yearPart); matched {
 				return true, nil
@@ -204,6 +339,19 @@ func IsYearFolder(dirPath string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// Extracts the year string from a year folder name by stripping the localized prefix
+func ExtractYearFromFolder(dirName string) string {
+	for _, prefix := range yearPrefixes {
+		if strings.HasPrefix(dirName, prefix) {
+			yearPart := strings.TrimPrefix(dirName, prefix)
+			if matched, _ := regexp.MatchString(`^\d{4}$`, yearPart); matched {
+				return yearPart
+			}
+		}
+	}
+	return dirName
 }
 
 // Checks whether a file, that is provided using its path, is a media file
@@ -244,7 +392,62 @@ func FindImagePartner(videoPath string) (string, error) {
 	return "", nil
 }
 
-// Counts all processable files in the source path
+// FindSourceRoots returns directories that contain the expected Google Photos
+// folder structure (subdirectories with media files). If the given path already
+// has that structure, it returns just that path. Otherwise it looks one level
+// deeper to support pointing at a directory of multiple takeout exports.
+func FindSourceRoots(path string) ([]string, error) {
+	if dirHasMediaSubdirs(path) {
+		return []string{path}, nil
+	}
+
+	subdirs, err := DiscoverDirs(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var roots []string
+	for _, sub := range subdirs {
+		child := filepath.Join(path, sub.Name())
+		if dirHasMediaSubdirs(child) {
+			roots = append(roots, child)
+		} else {
+			grandchildren, _ := DiscoverDirs(child)
+			for _, gc := range grandchildren {
+				gcPath := filepath.Join(child, gc.Name())
+				if dirHasMediaSubdirs(gcPath) {
+					roots = append(roots, gcPath)
+				}
+			}
+		}
+	}
+
+	if len(roots) == 0 {
+		return nil, fmt.Errorf("no media files found in folder structure")
+	}
+	return roots, nil
+}
+
+func dirHasMediaSubdirs(path string) bool {
+	subdirs, err := DiscoverDirs(path)
+	if err != nil {
+		return false
+	}
+	for _, sub := range subdirs {
+		files, err := os.ReadDir(filepath.Join(path, sub.Name()))
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if !f.IsDir() && IsMediaFile(f.Name()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Counts all processable files across one or more source roots
 func CountProcessableFiles(sourcePath string) (int, error) {
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
@@ -255,17 +458,23 @@ func CountProcessableFiles(sourcePath string) (int, error) {
 		return 0, fmt.Errorf("source path is not a directory")
 	}
 
-	count := 0
-	subdirs, err := DiscoverDirs(sourcePath)
+	roots, err := FindSourceRoots(sourcePath)
 	if err != nil {
 		return 0, err
 	}
 
-	for _, dir := range subdirs {
-		files, _ := os.ReadDir(filepath.Join(sourcePath, dir.Name()))
-		for _, file := range files {
-			if !file.IsDir() && IsMediaFile(file.Name()) {
-				count++
+	count := 0
+	for _, root := range roots {
+		subdirs, err := DiscoverDirs(root)
+		if err != nil {
+			continue
+		}
+		for _, dir := range subdirs {
+			files, _ := os.ReadDir(filepath.Join(root, dir.Name()))
+			for _, file := range files {
+				if !file.IsDir() && IsMediaFile(file.Name()) {
+					count++
+				}
 			}
 		}
 	}
@@ -276,29 +485,60 @@ func CountProcessableFiles(sourcePath string) (int, error) {
 	return count, nil
 }
 
-// Detect the month of a file based on its sidecar metadata
-// Returns the month as an integer between 1 and 12
-func DetectFileMonth(sourcePath string, sidecarPath string) (int, error) {
+// DetectFileDate returns the file's date from sidecar metadata, or if unavailable, from the filename
+func DetectFileDate(sourcePath string, sidecarPath string) (time.Time, error) {
 	if sidecarPath != "" {
 		metadata, err := ReadJsonMetadata(sidecarPath)
-		if err != nil {
-			return 0, err
+		if err == nil {
+			timestamp, err := strconv.ParseInt(metadata.PhotoTakenTime.Timestamp, 10, 64)
+			if err == nil {
+				return time.Unix(timestamp, 0), nil
+			}
 		}
-
-		timestamp, err := strconv.ParseInt(metadata.PhotoTakenTime.Timestamp, 10, 64)
-		if err != nil {
-			return 0, err
-		}
-
-		return int(time.Unix(timestamp, 0).Month()), nil
 	}
 
-	fileInfo, err := os.Stat(sourcePath)
-	if err != nil {
-		return 0, err
+	fileName := filepath.Base(sourcePath)
+	if t, ok := parseDateFromFileName(fileName); ok {
+		return t, nil
 	}
 
-	return int(fileInfo.ModTime().Month()), nil
+	return time.Time{}, fmt.Errorf("no date found for %s", filepath.Base(sourcePath))
+}
+
+const dateSep = `[-:._]?`
+const dateTimeSep = `[-:._ ]?`
+
+var dateTimeRe = regexp.MustCompile(
+	`(?:^|[^0-9])` +
+		`(\d{4})` + dateSep + `(\d{2})` + dateSep + `(\d{2})` +
+		`(?:` + dateTimeSep + `(\d{2})` + dateSep + `(\d{2})` + dateSep + `(\d{2}))?`,
+)
+
+func parseDateFromFileName(fileName string) (time.Time, bool) {
+	name := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+
+	m := dateTimeRe.FindStringSubmatch(name)
+	if m == nil {
+		return time.Time{}, false
+	}
+
+	year, _ := strconv.Atoi(m[1])
+	month, _ := strconv.Atoi(m[2])
+	day, _ := strconv.Atoi(m[3])
+
+	if year < 1970 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+
+	hour, min, sec := 0, 0, 0
+	if m[4] != "" {
+		hour, _ = strconv.Atoi(m[4])
+		min, _ = strconv.Atoi(m[5])
+		sec, _ = strconv.Atoi(m[6])
+	}
+
+	t := time.Date(year, time.Month(month), day, hour, min, sec, 0, time.UTC)
+	return t, true
 }
 
 func ResolveOutputDir(
@@ -313,7 +553,28 @@ func ResolveOutputDir(
 	}
 
 	targetDir := fixerCtx.OutputRoot
-	if sourceDirName != "" /*&& !fixerCtx.Options.IgnoreAlbums && !isYearFolder*/ {
+
+	if isYearFolder {
+		folderYear := ExtractYearFromFolder(sourceDirName)
+		fileName := filepath.Base(sourcePath)
+		fileNameDate, hasFileNameDate := parseDateFromFileName(fileName)
+
+		if fixerCtx.Options.UseFilenameTimestamp && hasFileNameDate {
+			detectedYear := strconv.Itoa(fileNameDate.Year())
+			if detectedYear != folderYear {
+				Log(LoggerInfo, "Re-sorting %s from %s to %s (filename timestamp)", fileName, folderYear, detectedYear)
+			}
+			targetDir = filepath.Join(targetDir, detectedYear)
+		} else {
+			if hasFileNameDate {
+				fileNameYear := strconv.Itoa(fileNameDate.Year())
+				if fileNameYear != folderYear {
+					Log(LoggerWarn, "File %s has filename date %d but is in year folder %s (enable 'Use filename timestamp' to re-sort)", fileName, fileNameDate.Year(), folderYear)
+				}
+			}
+			targetDir = filepath.Join(targetDir, folderYear)
+		}
+	} else if sourceDirName != "" {
 		targetDir = filepath.Join(targetDir, sourceDirName)
 	}
 
@@ -321,10 +582,17 @@ func ResolveOutputDir(
 		return targetDir, nil
 	}
 
-	month, err := DetectFileMonth(sourcePath, sidecarPath)
-	if err != nil {
-		return "", err
+	if fixerCtx.Options.UseFilenameTimestamp {
+		fileName := filepath.Base(sourcePath)
+		if t, ok := parseDateFromFileName(fileName); ok {
+			return filepath.Join(targetDir, fmt.Sprintf("%02d", int(t.Month()))), nil
+		}
 	}
 
-	return filepath.Join(targetDir, strconv.Itoa(month)), nil
+	fileDate, err := DetectFileDate(sourcePath, sidecarPath)
+	if err != nil {
+		return targetDir, nil
+	}
+
+	return filepath.Join(targetDir, fmt.Sprintf("%02d", int(fileDate.Month()))), nil
 }

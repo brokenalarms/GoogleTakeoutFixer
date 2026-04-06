@@ -32,6 +32,7 @@ const (
 	LoggerInfo  LogLevel = "INFO"
 	LoggerWarn  LogLevel = "WARN"
 	LoggerError LogLevel = "ERROR"
+	LoggerDebug LogLevel = "DEBUG"
 )
 
 // LogHandler allows the GUI or CLI to intercept logs

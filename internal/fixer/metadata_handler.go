@@ -20,6 +20,7 @@ package fixer
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -146,36 +147,18 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 	offsetStr := formatTimezoneOffset(offsetSec)
 
 	exifTime := localTime.Format("2006:01:02 15:04:05")
-	// exiftime with timezone
 	exifTimeWithTZ := exifTime + offsetStr
 
-	args := []string{
-		"-overwrite_original",
-		"-AllDates=" + exifTimeWithTZ,
-		"-TrackCreateDate=" + exifTimeWithTZ,
-		"-MediaCreateDate=" + exifTimeWithTZ,
-		"-FileCreateDate=" + exifTimeWithTZ,
-		"-FileModifyDate=" + exifTimeWithTZ,
-		"-OffsetTime=" + offsetStr,
-		"-OffsetTimeOriginal=" + offsetStr,
-		"-OffsetTimeDigitized=" + offsetStr,
-	}
-
-	// If a title exists, add it to args
+	// Common arguments for both images and videos
+	args := []string{"-overwrite_original"}
 	if meta.Title != "" {
 		args = append(args, "-Title="+meta.Title)
 	}
-
-	// If a description exists, add it to args
 	if meta.Description != "" {
 		args = append(args, "-ImageDescription="+meta.Description, "-Caption-Abstract="+meta.Description)
 	}
-
-	// If geodata exists, add it to args
-	// EXIF uses N E S W for geodata
 	if meta.GeoData.Latitude != 0 && meta.GeoData.Longitude != 0 {
 		lat, lon := meta.GeoData.Latitude, meta.GeoData.Longitude
-
 		latRef, lonRef := "N", "E"
 		if lat < 0 {
 			latRef = "S"
@@ -183,7 +166,6 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 		if lon < 0 {
 			lonRef = "W"
 		}
-
 		args = append(args,
 			fmt.Sprintf("-GPSLatitude=%f", math.Abs(lat)),
 			fmt.Sprintf("-GPSLatitudeRef=%s", latRef),
@@ -193,45 +175,92 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 		)
 	}
 
-	args = append(args, filePath)
+	if IsVideoFile(filePath) {
+		// For videos, run a separate one-shot exiftool process with a timeout to prevent hangs.
+		Log(LoggerInfo, "Applying metadata to video %s using one-shot exiftool...", filepath.Base(filePath))
 
-	// Use the persistent exiftool instance
-	exifToolMutex.Lock()
-	defer exifToolMutex.Unlock()
+		// Use video-specific date tags.
+		args = append(args,
+			"-CreateDate="+exifTimeWithTZ,
+			"-ModifyDate="+exifTimeWithTZ,
+			"-TrackCreateDate="+exifTimeWithTZ,
+			"-MediaCreateDate="+exifTimeWithTZ,
+			"-OffsetTimeOriginal="+offsetStr,
+		)
+		args = append(args, filePath)
 
-	if exifToolCmd == nil {
-		return fmt.Errorf("Exiftool is not initialized")
-	}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // 60-second timeout
+		defer cancel()
 
-	command := strings.Join(args, "\n") + "\n-execute\n"
-	if _, err := exifToolStdin.Write([]byte(command)); err != nil {
-		return fmt.Errorf("Failed to write to exiftool: %v", err)
-	}
+		cmd := exec.CommandContext(ctx, getExifToolPath(), args...)
+		output, err := cmd.CombinedOutput()
 
-	var exifErr error
-	for exifToolScanner.Scan() {
-		line := exifToolScanner.Text()
-		if line == "{ready}" {
-			break
+		if ctx.Err() == context.DeadlineExceeded {
+			Log(LoggerError, "Exiftool timed out processing video %s", filePath)
+			return fmt.Errorf("exiftool timed out on video: %s", filePath)
 		}
-		if strings.Contains(line, "Error") && exifErr == nil {
-			exifErr = fmt.Errorf("Exiftool error: %s", line)
+		if err != nil {
+			Log(LoggerError, "Exiftool failed on video %s: %v. Output: %s", filePath, err, string(output))
+			return fmt.Errorf("exiftool error on video %s: %w", filePath, err)
+		}
+	} else {
+		// For images, use the faster persistent exiftool process.
+		args = append(args,
+			"-AllDates="+exifTimeWithTZ,
+			"-OffsetTime="+offsetStr,
+			"-OffsetTimeOriginal="+offsetStr,
+			"-OffsetTimeDigitized="+offsetStr,
+		)
+		args = append(args, filePath)
+
+		exifToolMutex.Lock()
+		defer exifToolMutex.Unlock()
+
+		if exifToolCmd == nil {
+			return fmt.Errorf("Exiftool is not initialized")
+		}
+
+		command := strings.Join(args, "\n") + "\n-execute\n"
+		if _, err := exifToolStdin.Write([]byte(command)); err != nil {
+			return fmt.Errorf("Failed to write to exiftool: %v", err)
+		}
+
+		var exifErr error
+		for exifToolScanner.Scan() {
+			line := exifToolScanner.Text()
+			if line == "{ready}" {
+				break
+			}
+			if strings.Contains(line, "Error") && exifErr == nil {
+				exifErr = fmt.Errorf("Exiftool error: %s", line)
+			}
+		}
+
+		if exifErr != nil {
+			return exifErr
+		}
+
+		if err := exifToolScanner.Err(); err != nil {
+			return fmt.Errorf("Failed to read from exiftool: %v", err)
 		}
 	}
 
-	if exifErr != nil {
-		return exifErr
+	// Set file birth time (creation date) using macOS SetFile
+	if runtime.GOOS == "darwin" {
+		if err := SetFileBirthTime(filePath, localTime); err != nil {
+			Log(LoggerWarn, "Failed to set birth time for %s: %v", filePath, err)
+		}
 	}
 
-	if err := exifToolScanner.Err(); err != nil {
-		return fmt.Errorf("Failed to read from exiftool: %v", err)
-	}
+	return nil
+}
 
-	// Set the file system modification time to match
-	if err := os.Chtimes(filePath, utcTime, utcTime); err != nil {
-		return fmt.Errorf("failed to set file timestamps: %v", err)
+func SetFileBirthTime(filePath string, t time.Time) error {
+	setfileFormat := t.Format("01/02/2006 15:04:05")
+	cmd := exec.Command("SetFile", "-d", setfileFormat, filePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("SetFile failed: %v, output: %s", err, string(output))
 	}
-
 	return nil
 }
 

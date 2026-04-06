@@ -33,6 +33,8 @@ import (
 type Progress struct {
 	Total     int
 	Processed int
+	Succeeded int
+	Failed    int
 	Current   string
 }
 
@@ -45,6 +47,7 @@ type ProcessOptions struct {
 	IgnoreAlbums        bool
 	Flatten             bool
 	RestoreMOVExtension bool // See issue #2
+	UseFilenameTimestamp bool
 }
 
 type FixerContext struct {
@@ -128,42 +131,59 @@ func Process(
 		ProgressCh: progressCh,
 	}
 
-	// process all directories in the source directory, ignore files in the source directory itself
-	// because all media files should be inside of sub-folders
 	if fileInfo.IsDir() {
-		dirs, err := DiscoverDirs(sourcePath)
+		roots, err := FindSourceRoots(sourcePath)
 		if err != nil {
-			Log(LoggerError, "Error discovering directories: %v", err)
+			Log(LoggerError, "Error finding source roots: %v", err)
+			return err
 		}
 
-		for _, dir := range dirs {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
+		for _, root := range roots {
+			fixerCtx.SourceRoot = root
+			Log(LoggerInfo, "Processing source root: %s", root)
 
-			dirPath := filepath.Join(sourcePath, dir.Name())
-			var targetPath string = filepath.Join(outputPath, dir.Name())
-
-			isYearFolder, err := IsYearFolder(dir.Name())
+			dirs, err := DiscoverDirs(root)
 			if err != nil {
-				Log(LoggerWarn, "Failed to determine if folder is a year folder for %s: %v", dir.Name(), err)
-			}
-			if (options.IgnoreAlbums || options.Flatten) && !isYearFolder {
-				Log(LoggerInfo, "Skipping album folder: %s", dir.Name())
+				Log(LoggerError, "Error discovering directories in %s: %v", root, err)
 				continue
 			}
 
-			p = ProcessDirectory(fixerCtx, dirPath, targetPath, isYearFolder, p)
+			for _, dir := range dirs {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+
+				dirPath := filepath.Join(root, dir.Name())
+
+				isYearFolder, err := IsYearFolder(dir.Name())
+				if err != nil {
+					Log(LoggerWarn, "Failed to determine if folder is a year folder for %s: %v", dir.Name(), err)
+				}
+				if options.IgnoreAlbums && !isYearFolder {
+					Log(LoggerInfo, "Skipping album folder: %s", dir.Name())
+					continue
+				}
+
+				outputDirName := dir.Name()
+				if isYearFolder {
+					outputDirName = ExtractYearFromFolder(dir.Name())
+				}
+				targetPath := filepath.Join(outputPath, outputDirName)
+
+				p = ProcessDirectory(fixerCtx, dirPath, targetPath, isYearFolder, p)
+			}
 		}
 	} else {
 		err = ProcessFile(fixerCtx, sourcePath, "", false)
+		p.Processed++
+		p.Current = sourcePath
 		if err != nil {
+			p.Failed++
 			Log(LoggerError, "Error processing file: %v", err)
 		} else {
-			p.Processed++
-			p.Current = sourcePath
-			progressCh <- p
+			p.Succeeded++
 		}
+		progressCh <- p
 	}
 
 	return nil
@@ -228,9 +248,11 @@ func ProcessDirectory(
 
 		// Check whether a file is a media file
 		if !IsMediaFile(imagePath) {
+			Log(LoggerDebug, "Skipping non-media file: %s", imagePath)
 			continue
 		}
 
+		Log(LoggerDebug, "Queuing media file: %s", imagePath)
 		wg.Add(1)
 		jobs <- imagePath
 	}
@@ -253,6 +275,7 @@ func ProcessDirectory(
 				completed = nil
 			} else {
 				p.Processed++
+				p.Succeeded++
 				p.Current = ev
 				fixerCtx.ProgressCh <- p
 			}
@@ -260,7 +283,10 @@ func ProcessDirectory(
 			if !ok {
 				errors = nil
 			} else {
+				p.Processed++
+				p.Failed++
 				Log(LoggerError, "%v", err)
+				fixerCtx.ProgressCh <- p
 			}
 		case <-fixerCtx.Ctx.Done():
 			// Let workers finish their current job but dont add new jobs
@@ -299,7 +325,7 @@ func ProcessFile(
 
 	//destPath := filepath.Join(outputPath, fileName)
 
-	sidecarPath, err := FindSidecar(sourcePath)
+	sidecarPath, err := FindSidecar(sourcePath, fixerCtx)
 
 	if err != nil {
 		Log(LoggerError, "Error finding sidecar for file %s: %v", sourcePath, err)
@@ -310,7 +336,7 @@ func ProcessFile(
 	if sidecarPath == "" && IsVideoFile(sourcePath) {
 		partnerImage, err := FindImagePartner(sourcePath)
 		if err == nil && partnerImage != "" {
-			partnerSidecar, err := FindSidecar(partnerImage)
+			partnerSidecar, err := FindSidecar(partnerImage, fixerCtx)
 			if err == nil && partnerSidecar != "" {
 				sidecarPath = partnerSidecar
 			}
@@ -322,12 +348,7 @@ func ProcessFile(
 		return err
 	}
 
-	destPath := filepath.Join(outputDir, fileName)
-
-	if _, err := os.Stat(destPath); err == nil {
-		Log(LoggerInfo, "File %s already exists, skipping", destPath)
-		return nil
-	}
+	destPath := deduplicatePath(filepath.Join(outputDir, fileName))
 
 	// Metadata sidecar file not found, copy the file without metadata
 	if sidecarPath == "" {
@@ -371,9 +392,9 @@ func CreateFixedFile(
 	if fixerCtx.Options.UseSymlinks && !isYearFolder {
 		monthFolder := ""
 		if fixerCtx.Options.MonthSubfolders {
-			month, err := DetectFileMonth(filePath, fileMetadataPath)
+			fileDate, err := DetectFileDate(filePath, fileMetadataPath)
 			if err == nil {
-				monthFolder = strconv.Itoa(month)
+				monthFolder = strconv.Itoa(int(fileDate.Month()))
 			}
 		}
 
