@@ -47,17 +47,29 @@ type ProcessOptions struct {
 	RestoreMOVExtension       bool // See issue #2
 	UseFilenameTimestamp       bool
 	PreferFilenameOverSidecar bool
-	DateFolders               bool
+	DateFolders              bool
 	AppendDateToFilename     bool
+	DeduplicateOutput        bool
+}
+
+type WrittenFile struct {
+	DestPath     string
+	HasSidecar   bool
+	DateOriginal string
+	ImageWidth   string
+	ImageHeight  string
+	FileSize     int64
+	BaseNameLen  int
 }
 
 type FixerContext struct {
-	Ctx        context.Context
+	Ctx         context.Context
 	SourceRoot  string
 	AllRoots    []string
 	OutputRoot  string
 	Options     ProcessOptions
 	ProgressCh  chan<- Progress
+	WrittenFiles map[string]WrittenFile
 }
 
 // Process is the main fixer entry point.
@@ -126,11 +138,12 @@ func Process(
 	}
 
 	fixerCtx := &FixerContext{
-		Ctx:        ctx,
-		SourceRoot: sourcePath,
-		OutputRoot: outputPath,
-		Options:    options,
-		ProgressCh: progressCh,
+		Ctx:          ctx,
+		SourceRoot:   sourcePath,
+		OutputRoot:   outputPath,
+		Options:      options,
+		ProgressCh:   progressCh,
+		WrittenFiles: make(map[string]WrittenFile),
 	}
 
 	if fileInfo.IsDir() {
@@ -311,21 +324,63 @@ func ProcessFile(
 	}
 
 	destPath := deduplicatePath(filepath.Join(outputDir, fileName))
+	hasSidecar := sidecarPath != ""
 
-	// Metadata sidecar file not found, copy the file without metadata
-	if sidecarPath == "" {
+	if !hasSidecar {
 		Log(LoggerWarn, "No sidecar file found for %s — copying without metadata", sourcePath)
-		if err := CreateFixedFile(fixerCtx, sourcePath, "", destPath, isYearFolder); err != nil {
-			Log(LoggerError, "Error creating file without sidecar for %s: %v", sourcePath, err)
-			return err
-		}
-		return nil
 	}
 
-	err = CreateFixedFile(fixerCtx, sourcePath, sidecarPath, destPath, isYearFolder)
-	if err != nil {
+	if err := CreateFixedFile(fixerCtx, sourcePath, sidecarPath, destPath, isYearFolder); err != nil {
 		Log(LoggerError, "Error creating fixed file for %s: %v", sourcePath, err)
 		return err
+	}
+
+	if fixerCtx.Options.DeduplicateOutput {
+		newSize := int64(0)
+		if info, err := os.Stat(destPath); err == nil {
+			newSize = info.Size()
+		}
+
+		isDuplicate := false
+		if existing, found := FindDuplicateMatch(fixerCtx, fileName); found {
+			newDate, newW, newH, exifErr := ReadExifIdentity(destPath)
+			exifMatch := exifErr == nil && newDate != "" &&
+				newDate == existing.DateOriginal &&
+				newW == existing.ImageWidth &&
+				newH == existing.ImageHeight
+			sizeMatch := newSize == existing.FileSize
+
+			if exifMatch && sizeMatch {
+				isDuplicate = true
+				newIsBetter := false
+				if hasSidecar && !existing.HasSidecar {
+					newIsBetter = true
+				} else if hasSidecar == existing.HasSidecar && len(fileName) > existing.BaseNameLen {
+					newIsBetter = true
+				}
+
+				if newIsBetter {
+					Log(LoggerInfo, "Dedup: replacing %s with better copy %s", filepath.Base(existing.DestPath), filepath.Base(destPath))
+					if err := MoveToDuplicates(fixerCtx, existing.DestPath); err != nil {
+						Log(LoggerWarn, "Failed to move duplicate %s: %v", existing.DestPath, err)
+					}
+				} else {
+					Log(LoggerInfo, "Dedup: moving duplicate %s (keeping %s)", filepath.Base(destPath), filepath.Base(existing.DestPath))
+					if err := MoveToDuplicates(fixerCtx, destPath); err != nil {
+						Log(LoggerWarn, "Failed to move duplicate %s: %v", destPath, err)
+					}
+				}
+			}
+		}
+
+		if !isDuplicate {
+			date, w, h, _ := ReadExifIdentity(destPath)
+			RegisterWrittenFile(fixerCtx, fileName, WrittenFile{
+				DestPath: destPath, HasSidecar: hasSidecar,
+				DateOriginal: date, ImageWidth: w, ImageHeight: h,
+				FileSize: newSize, BaseNameLen: len(fileName),
+			})
+		}
 	}
 
 	return nil

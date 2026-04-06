@@ -119,6 +119,41 @@ func deduplicatePath(path string) string {
 	}
 }
 
+// BaseKey returns a lowercase filename without extension
+func BaseKey(fileName string) string {
+	return strings.ToLower(strings.TrimSuffix(fileName, filepath.Ext(fileName)))
+}
+
+// FindDuplicateMatch checks if a file with a substring-matching base name has already been written
+func FindDuplicateMatch(fixerCtx *FixerContext, fileName string) (WrittenFile, bool) {
+	newKey := BaseKey(fileName)
+	for existingKey, wf := range fixerCtx.WrittenFiles {
+		if strings.Contains(newKey, existingKey) || strings.Contains(existingKey, newKey) {
+			return wf, true
+		}
+	}
+	return WrittenFile{}, false
+}
+
+// RegisterWrittenFile records a file in the dedup map
+func RegisterWrittenFile(fixerCtx *FixerContext, fileName string, wf WrittenFile) {
+	fixerCtx.WrittenFiles[BaseKey(fileName)] = wf
+}
+
+// MoveToDuplicates moves a file to the _duplicates folder preserving the relative path structure
+func MoveToDuplicates(fixerCtx *FixerContext, filePath string) error {
+	relPath, err := filepath.Rel(fixerCtx.OutputRoot, filePath)
+	if err != nil {
+		return err
+	}
+	dupPath := filepath.Join(fixerCtx.OutputRoot, "_duplicates", relPath)
+	dupDir := filepath.Dir(dupPath)
+	if err := os.MkdirAll(dupDir, 0755); err != nil {
+		return err
+	}
+	return os.Rename(filePath, dupPath)
+}
+
 // Duplicate a file from one path to another
 func DuplicateFile(inputPath string, outputPath string) error {
 	sourceFile, err := os.Open(inputPath)
@@ -224,8 +259,8 @@ func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
 		}
 
 		prefix := strings.ToLower(cleanBase)
-		if len(prefix) > 47 {
-			prefix = prefix[:47]
+		if len(prefix) > 46 {
+			prefix = prefix[:46]
 		}
 		for _, entry := range entries {
 			if !entry.IsDir() {
@@ -646,7 +681,7 @@ func ResolveOutputDir(
 	}
 
 	if fixerCtx.Options.MonthSubfolders {
-		targetDir = filepath.Join(targetDir, fmt.Sprintf("%02d", int(fileDate.Month())))
+		targetDir = filepath.Join(targetDir, fileDate.Format("2006-01"))
 	}
 
 	if fixerCtx.Options.DateFolders {

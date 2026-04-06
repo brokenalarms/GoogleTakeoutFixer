@@ -54,6 +54,7 @@ func Main() {
 	var preferFilenameOverSidecar bool = false
 	var dateFolders bool = false
 	var appendDate bool = false
+	var dedup bool = false
 
 	progressLabel := widget.NewLabel("Ready to start")
 	progressLabel.Truncation = fyne.TextTruncateEllipsis
@@ -121,6 +122,10 @@ func Main() {
 		appendDate = value
 	})
 
+	dedupCheckbox := widget.NewCheck("Move duplicates to _duplicates", func(value bool) {
+		dedup = value
+	})
+
 	preferFilenameOverSidecarCheckbox := widget.NewCheck("Prefer filename over sidecar when dates conflict", func(value bool) {
 		preferFilenameOverSidecar = value
 	})
@@ -167,6 +172,7 @@ func Main() {
 	restoreMOVExtensionCheckbox.SetChecked(restoreMOVExtension)
 	dateFoldersCheckbox.SetChecked(dateFolders)
 	appendDateCheckbox.SetChecked(appendDate)
+	dedupCheckbox.SetChecked(dedup)
 	useFilenameTimestampCheckbox.SetChecked(useFilenameTimestamp)
 	preferFilenameOverSidecarCheckbox.SetChecked(preferFilenameOverSidecar)
 
@@ -206,6 +212,7 @@ func Main() {
 		restoreMOVExtensionCheckbox.Disable()
 		dateFoldersCheckbox.Disable()
 		appendDateCheckbox.Disable()
+		dedupCheckbox.Disable()
 		useFilenameTimestampCheckbox.Disable()
 		preferFilenameOverSidecarCheckbox.Disable()
 
@@ -229,6 +236,7 @@ func Main() {
 			PreferFilenameOverSidecar: preferFilenameOverSidecar,
 			DateFolders:               dateFolders,
 			AppendDateToFilename:     appendDate,
+			DeduplicateOutput:        dedup,
 		}
 		go func() {
 			if err := fixer.Process(ctx, inputPath, outputPath, progressCh, opts); err != nil {
@@ -297,6 +305,7 @@ func Main() {
 				restoreMOVExtensionCheckbox.Enable()
 				dateFoldersCheckbox.Enable()
 				appendDateCheckbox.Enable()
+				dedupCheckbox.Enable()
 				useFilenameTimestampCheckbox.Enable()
 				preferFilenameOverSidecarCheckbox.Enable()
 				writeMetadataCheckbox.Enable()
@@ -385,6 +394,7 @@ func Main() {
 		dateFoldersCheckbox,
 		restoreMOVExtensionCheckbox,
 		appendDateCheckbox,
+		dedupCheckbox,
 	)
 
 	filenameTimestampGroup := container.NewVBox(
