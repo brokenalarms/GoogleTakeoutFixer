@@ -50,6 +50,7 @@ func Main() {
 	var ignoreAlbums bool = false
 	var monthSubfolders bool = false
 	var restoreMOVExtension bool = false
+	var dedup bool = false
 
 	progressLabel := widget.NewLabel("Ready to start")
 	progressLabel.Truncation = fyne.TextTruncateEllipsis
@@ -110,6 +111,10 @@ func Main() {
 		fmt.Println("restore MOV extension", restoreMOVExtension)
 	})
 
+	dedupCheckbox := widget.NewCheck("Move duplicates to _duplicates", func(value bool) {
+		dedup = value
+	})
+
 	// Fix conflicting options
 	updateCheckboxStates := func() {
 		setEnabled := func(cb *widget.Check, enabled bool) {
@@ -154,6 +159,7 @@ func Main() {
 		monthSubfoldersCheckbox.Disable()
 		flattenCheckbox.Disable()
 		restoreMOVExtensionCheckbox.Disable()
+		dedupCheckbox.Disable()
 
 		fixer.Log(fixer.LoggerInfo, "Processing...")
 		progressBar.SetValue(0)
@@ -171,6 +177,7 @@ func Main() {
 			IgnoreAlbums:        ignoreAlbums,
 			MonthSubfolders:     monthSubfolders,
 			RestoreMOVExtension: restoreMOVExtension,
+			DeduplicateOutput:   dedup,
 		}
 		go func() {
 			if err := fixer.Process(ctx, inputPath, outputPath, progressCh, opts); err != nil {
@@ -235,6 +242,7 @@ func Main() {
 				// Manually re-enable restoreMOVExtensionCheckbox and writeMetadataCheckbox
 				// since they are not affected by other checboxes in updateCheckboxStates
 				restoreMOVExtensionCheckbox.Enable()
+				dedupCheckbox.Enable()
 				writeMetadataCheckbox.Enable()
 				// Re-enable checboxes based on current states
 				updateCheckboxStates()
@@ -319,6 +327,7 @@ func Main() {
 		monthSubfoldersCheckbox,
 		flattenCheckbox,
 		restoreMOVExtensionCheckbox,
+		dedupCheckbox,
 	)
 
 	StartCancelRow := container.NewGridWithColumns(2, startButton, cancelButton)

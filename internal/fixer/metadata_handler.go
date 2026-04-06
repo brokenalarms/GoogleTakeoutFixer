@@ -235,6 +235,40 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 	return nil
 }
 
+// ReadExifIdentity reads DateTimeOriginal, ImageWidth, ImageHeight for dedup comparison
+func ReadExifIdentity(filePath string) (dateOriginal string, width string, height string, err error) {
+	exifToolMutex.Lock()
+	defer exifToolMutex.Unlock()
+
+	if exifToolCmd == nil {
+		return "", "", "", fmt.Errorf("exiftool not initialized")
+	}
+
+	if _, err := fmt.Fprintf(exifToolStdin, "-DateTimeOriginal\n-ImageWidth\n-ImageHeight\n-s3\n-charset\nfilename=utf8\n%s\n-execute\n", filePath); err != nil {
+		return "", "", "", err
+	}
+
+	var lines []string
+	for exifToolScanner.Scan() {
+		line := exifToolScanner.Text()
+		if line == "{ready}" {
+			break
+		}
+		if !strings.Contains(line, "Error") {
+			lines = append(lines, strings.TrimSpace(line))
+		}
+	}
+
+	if scanErr := exifToolScanner.Err(); scanErr != nil {
+		return "", "", "", scanErr
+	}
+
+	if len(lines) >= 3 {
+		return lines[0], lines[1], lines[2], nil
+	}
+	return "", "", "", fmt.Errorf("incomplete EXIF identity for %s", filepath.Base(filePath))
+}
+
 // GetMajorBrand reads the MajorBrand tag from a file using the persistent exiftool instance
 func GetMajorBrand(filePath string) (string, error) {
 	exifToolMutex.Lock()

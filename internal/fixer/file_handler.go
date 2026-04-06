@@ -102,6 +102,39 @@ func IsVideoFile(path string) bool {
 	return ok
 }
 
+var trailingParenNum = regexp.MustCompile(`\s*\(\d+\)$`)
+
+func DedupKey(fileName string) string {
+	ext := filepath.Ext(fileName)
+	base := strings.TrimSuffix(fileName, ext)
+	base = trailingParenNum.ReplaceAllString(base, "")
+	return strings.ToLower(base + ext)
+}
+
+func FindDuplicateMatch(fixerCtx *FixerContext, originalFileName string) (WrittenFile, bool) {
+	if wf, ok := fixerCtx.WrittenFiles[DedupKey(originalFileName)]; ok {
+		return wf, true
+	}
+	return WrittenFile{}, false
+}
+
+func RegisterWrittenFile(fixerCtx *FixerContext, originalFileName string, wf WrittenFile) {
+	fixerCtx.WrittenFiles[DedupKey(originalFileName)] = wf
+}
+
+func MoveToDuplicates(fixerCtx *FixerContext, filePath string) error {
+	relPath, err := filepath.Rel(fixerCtx.OutputRoot, filePath)
+	if err != nil {
+		return err
+	}
+	dupPath := filepath.Join(fixerCtx.OutputRoot, "_duplicates", relPath)
+	dupDir := filepath.Dir(dupPath)
+	if err := os.MkdirAll(dupDir, 0755); err != nil {
+		return err
+	}
+	return os.Rename(filePath, dupPath)
+}
+
 // Duplicate a file from one path to another
 func DuplicateFile(inputPath string, outputPath string) error {
 	sourceFile, err := os.Open(inputPath)

@@ -45,14 +45,26 @@ type ProcessOptions struct {
 	IgnoreAlbums        bool
 	Flatten             bool
 	RestoreMOVExtension bool // See issue #2
+	DeduplicateOutput   bool
+}
+
+type WrittenFile struct {
+	DestPath     string
+	HasSidecar   bool
+	DateOriginal string
+	ImageWidth   string
+	ImageHeight  string
+	FileSize     int64
+	BaseNameLen  int
 }
 
 type FixerContext struct {
-	Ctx        context.Context
-	SourceRoot string
-	OutputRoot string
-	Options    ProcessOptions
-	ProgressCh chan<- Progress
+	Ctx          context.Context
+	SourceRoot   string
+	OutputRoot   string
+	Options      ProcessOptions
+	ProgressCh   chan<- Progress
+	WrittenFiles map[string]WrittenFile
 }
 
 // Process is the main fixer entry point.
@@ -120,12 +132,23 @@ func Process(
 		return err
 	}
 
+	if options.DeduplicateOutput {
+		if err := InitializeExifTool(); err != nil {
+			Log(LoggerError, "Failed to initialize exiftool for dedup: %v", err)
+			return err
+		}
+		if !options.WriteMetadata && !options.RestoreMOVExtension {
+			defer CloseExifTool()
+		}
+	}
+
 	fixerCtx := &FixerContext{
-		Ctx:        ctx,
-		SourceRoot: sourcePath,
-		OutputRoot: outputPath,
-		Options:    options,
-		ProgressCh: progressCh,
+		Ctx:          ctx,
+		SourceRoot:   sourcePath,
+		OutputRoot:   outputPath,
+		Options:      options,
+		ProgressCh:   progressCh,
+		WrittenFiles: make(map[string]WrittenFile),
 	}
 
 	// process all directories in the source directory, ignore files in the source directory itself
@@ -322,6 +345,7 @@ func ProcessFile(
 		return err
 	}
 
+	originalFileName := filepath.Base(sourcePath)
 	destPath := filepath.Join(outputDir, fileName)
 
 	if _, err := os.Stat(destPath); err == nil {
@@ -329,20 +353,62 @@ func ProcessFile(
 		return nil
 	}
 
-	// Metadata sidecar file not found, copy the file without metadata
-	if sidecarPath == "" {
+	hasSidecar := sidecarPath != ""
+	if !hasSidecar {
 		Log(LoggerWarn, "No sidecar file found for %s — copying without metadata", sourcePath)
-		if err := CreateFixedFile(fixerCtx, sourcePath, "", destPath, isYearFolder); err != nil {
-			Log(LoggerError, "Error creating file without sidecar for %s: %v", sourcePath, err)
-			return err
-		}
-		return nil
 	}
 
-	err = CreateFixedFile(fixerCtx, sourcePath, sidecarPath, destPath, isYearFolder)
-	if err != nil {
+	if err := CreateFixedFile(fixerCtx, sourcePath, sidecarPath, destPath, isYearFolder); err != nil {
 		Log(LoggerError, "Error creating fixed file for %s: %v", sourcePath, err)
 		return err
+	}
+
+	if fixerCtx.Options.DeduplicateOutput {
+		newSize := int64(0)
+		if info, err := os.Stat(destPath); err == nil {
+			newSize = info.Size()
+		}
+
+		isDuplicate := false
+		if existing, found := FindDuplicateMatch(fixerCtx, originalFileName); found {
+			newDate, newW, newH, exifErr := ReadExifIdentity(destPath)
+			exifMatch := exifErr == nil && newDate != "" &&
+				newDate == existing.DateOriginal &&
+				newW == existing.ImageWidth &&
+				newH == existing.ImageHeight
+			sizeMatch := newSize == existing.FileSize
+
+			if exifMatch && sizeMatch {
+				isDuplicate = true
+				newIsBetter := false
+				if hasSidecar && !existing.HasSidecar {
+					newIsBetter = true
+				} else if hasSidecar == existing.HasSidecar && len(originalFileName) > existing.BaseNameLen {
+					newIsBetter = true
+				}
+
+				if newIsBetter {
+					Log(LoggerInfo, "Dedup: replacing %s with better copy %s", filepath.Base(existing.DestPath), filepath.Base(destPath))
+					if err := MoveToDuplicates(fixerCtx, existing.DestPath); err != nil {
+						Log(LoggerWarn, "Failed to move duplicate %s: %v", existing.DestPath, err)
+					}
+				} else {
+					Log(LoggerInfo, "Dedup: moving duplicate %s (keeping %s)", filepath.Base(destPath), filepath.Base(existing.DestPath))
+					if err := MoveToDuplicates(fixerCtx, destPath); err != nil {
+						Log(LoggerWarn, "Failed to move duplicate %s: %v", destPath, err)
+					}
+				}
+			}
+		}
+
+		if !isDuplicate {
+			date, w, h, _ := ReadExifIdentity(destPath)
+			RegisterWrittenFile(fixerCtx, originalFileName, WrittenFile{
+				DestPath: destPath, HasSidecar: hasSidecar,
+				DateOriginal: date, ImageWidth: w, ImageHeight: h,
+				FileSize: newSize, BaseNameLen: len(originalFileName),
+			})
+		}
 	}
 
 	return nil
