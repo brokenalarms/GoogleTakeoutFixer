@@ -48,6 +48,8 @@ func Main() {
 	restoreMOV := flag.Bool("restore-mov", false, "Restore .MOV file extension in case the Major Brand EXIF field says \"Apple QuickTime (.MOV/QT)\"")
 	useFilenameTimestamp := flag.Bool("use-filename-timestamp", true, "Use date from filename (YYYYMMDD or YYYY-MM-DD) as a fallback date source")
 	preferFilenameOverSidecar := flag.Bool("prefer-filename-over-sidecar", false, "When filename and sidecar dates conflict, prefer the filename date for sorting")
+	dateFolders := flag.Bool("date-folders", false, "Organize files into YYYY-MM-DD subfolders instead of month numbers")
+	appendDate := flag.Bool("append-date", false, "Append YYYY-MM-DD HH.MM to output filenames")
 
 	flag.Parse()
 
@@ -94,6 +96,8 @@ func Main() {
 		RestoreMOVExtension: *restoreMOV,
 		UseFilenameTimestamp:       *useFilenameTimestamp,
 		PreferFilenameOverSidecar: *preferFilenameOverSidecar,
+		DateFolders:               *dateFolders,
+		AppendDateToFilename:     *appendDate,
 	}
 
 	go func() {

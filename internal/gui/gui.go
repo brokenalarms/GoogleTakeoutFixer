@@ -52,6 +52,8 @@ func Main() {
 	var restoreMOVExtension bool = false
 	var useFilenameTimestamp bool = true
 	var preferFilenameOverSidecar bool = false
+	var dateFolders bool = false
+	var appendDate bool = false
 
 	progressLabel := widget.NewLabel("Ready to start")
 	progressLabel.Truncation = fyne.TextTruncateEllipsis
@@ -112,6 +114,14 @@ func Main() {
 		fmt.Println("restore MOV extension", restoreMOVExtension)
 	})
 
+	dateFoldersCheckbox := widget.NewCheck("Date folders (YYYY-MM-DD)", func(value bool) {
+		dateFolders = value
+	})
+
+	appendDateCheckbox := widget.NewCheck("Append date to filename", func(value bool) {
+		appendDate = value
+	})
+
 	preferFilenameOverSidecarCheckbox := widget.NewCheck("Prefer filename over sidecar when dates conflict", func(value bool) {
 		preferFilenameOverSidecar = value
 	})
@@ -156,6 +166,8 @@ func Main() {
 	monthSubfoldersCheckbox.SetChecked(monthSubfolders)
 	flattenCheckbox.SetChecked(flatten)
 	restoreMOVExtensionCheckbox.SetChecked(restoreMOVExtension)
+	dateFoldersCheckbox.SetChecked(dateFolders)
+	appendDateCheckbox.SetChecked(appendDate)
 	useFilenameTimestampCheckbox.SetChecked(useFilenameTimestamp)
 	preferFilenameOverSidecarCheckbox.SetChecked(preferFilenameOverSidecar)
 
@@ -193,6 +205,8 @@ func Main() {
 		monthSubfoldersCheckbox.Disable()
 		flattenCheckbox.Disable()
 		restoreMOVExtensionCheckbox.Disable()
+		dateFoldersCheckbox.Disable()
+		appendDateCheckbox.Disable()
 		useFilenameTimestampCheckbox.Disable()
 		preferFilenameOverSidecarCheckbox.Disable()
 
@@ -214,6 +228,8 @@ func Main() {
 			RestoreMOVExtension: restoreMOVExtension,
 			UseFilenameTimestamp:       useFilenameTimestamp,
 			PreferFilenameOverSidecar: preferFilenameOverSidecar,
+			DateFolders:               dateFolders,
+			AppendDateToFilename:     appendDate,
 		}
 		go func() {
 			if err := fixer.Process(ctx, inputPath, outputPath, progressCh, opts); err != nil {
@@ -266,6 +282,7 @@ func Main() {
 					fixer.Log(fixer.LoggerInfo, "Detailed logs are saved in the ./logs folder")
 					fixer.Log(fixer.LoggerInfo, "Done")
 
+					fixer.Log(fixer.LoggerInfo, "Final progress: Total=%d Processed=%d Succeeded=%d Failed=%d", lastP.Total, lastP.Processed, lastP.Succeeded, lastP.Failed)
 					summary := fmt.Sprintf("Finished processing %d files (%d succeeded, %d failed)", lastP.Total, lastP.Succeeded, lastP.Failed)
 					progressLabel.SetText(summary)
 					fixer.Log(fixer.LoggerInfo, "%s", summary)
@@ -279,6 +296,8 @@ func Main() {
 				// Manually re-enable restoreMOVExtensionCheckbox and writeMetadataCheckbox
 				// since they are not affected by other checboxes in updateCheckboxStates
 				restoreMOVExtensionCheckbox.Enable()
+				dateFoldersCheckbox.Enable()
+				appendDateCheckbox.Enable()
 				useFilenameTimestampCheckbox.Enable()
 				preferFilenameOverSidecarCheckbox.Enable()
 				writeMetadataCheckbox.Enable()
@@ -365,6 +384,8 @@ func Main() {
 		monthSubfoldersCheckbox,
 		flattenCheckbox,
 		restoreMOVExtensionCheckbox,
+		dateFoldersCheckbox,
+		appendDateCheckbox,
 	)
 
 	filenameTimestampGroup := container.NewVBox(

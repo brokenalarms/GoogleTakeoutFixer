@@ -179,13 +179,18 @@ func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
 		targets[strings.ToLower(base+".json")] = struct{}{}
 		targets[strings.ToLower(fileName+".supplemental-metadata.json")] = struct{}{}
 		targets[strings.ToLower(base+".supplemental-metadata.json")] = struct{}{}
+		// Double-dot pattern: Google produces "file.mov..json" for some files
+		targets[strings.ToLower(fileName+"."+".json")] = struct{}{}
 
+		parenSuffix := ""
 		if strings.Contains(base, "(") && strings.HasSuffix(base, ")") {
 			start := strings.LastIndex(base, "(")
 			parenCleanBase := base[:start]
-			parenSuffix := base[start:]
+			parenSuffix = base[start:]
 			targets[strings.ToLower(parenCleanBase+ext+parenSuffix+".json")] = struct{}{}
 			targets[strings.ToLower(base+".json")] = struct{}{}
+			// supplemental-metadata(N).json where (N) matches the media file's suffix
+			targets[strings.ToLower(parenCleanBase+ext+".supplemental-metadata"+parenSuffix+".json")] = struct{}{}
 		}
 
 		cleanBase := base
@@ -275,6 +280,46 @@ func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
 				if sidecarPath != "" {
 					Log(LoggerInfo, "FindSidecar: SUCCESS, found sidecar in year folder.")
 					return sidecarPath, nil
+				}
+			}
+		}
+	}
+
+	// --- Phase 4: Search matching directories across all source roots ---
+	if fixerCtx != nil && len(fixerCtx.AllRoots) > 1 {
+		currentDirName := filepath.Base(currentDir)
+		for _, root := range fixerCtx.AllRoots {
+			if root == fixerCtx.SourceRoot {
+				continue
+			}
+
+			// Search in the equivalent directory name in other roots
+			otherDir := filepath.Join(root, currentDirName)
+			if _, statErr := os.Stat(otherDir); statErr == nil {
+				sidecarPath, err = searchLogic(otherDir)
+				if err != nil {
+					return "", err
+				}
+				if sidecarPath != "" {
+					Log(LoggerInfo, "FindSidecar: SUCCESS, found sidecar in other root: %s", root)
+					return sidecarPath, nil
+				}
+			}
+
+			// Also search year folders in other roots
+			if year != "" {
+				for _, yearFolderName := range []string{"Photos from " + year, year} {
+					yearFolderPath := filepath.Join(root, yearFolderName)
+					if _, statErr := os.Stat(yearFolderPath); statErr == nil {
+						sidecarPath, err = searchLogic(yearFolderPath)
+						if err != nil {
+							return "", err
+						}
+						if sidecarPath != "" {
+							Log(LoggerInfo, "FindSidecar: SUCCESS, found sidecar in other root year folder: %s", yearFolderPath)
+							return sidecarPath, nil
+						}
+					}
 				}
 			}
 		}
@@ -574,20 +619,34 @@ func ResolveOutputDir(
 		targetDir = filepath.Join(targetDir, sourceDirName)
 	}
 
-	if !fixerCtx.Options.MonthSubfolders {
+	if !fixerCtx.Options.MonthSubfolders && !fixerCtx.Options.DateFolders {
 		return targetDir, nil
 	}
+
+	var fileDate time.Time
+	var hasDate bool
 
 	if fixerCtx.Options.PreferFilenameOverSidecar {
 		fileName := filepath.Base(sourcePath)
 		if t, ok := parseDateFromFileName(fileName); ok {
-			return filepath.Join(targetDir, fmt.Sprintf("%02d", int(t.Month()))), nil
+			fileDate = t
+			hasDate = true
 		}
 	}
 
-	fileDate, err := DetectFileDate(sourcePath, sidecarPath)
-	if err != nil {
+	if !hasDate {
+		if t, err := DetectFileDate(sourcePath, sidecarPath); err == nil {
+			fileDate = t
+			hasDate = true
+		}
+	}
+
+	if !hasDate {
 		return targetDir, nil
+	}
+
+	if fixerCtx.Options.DateFolders {
+		return filepath.Join(targetDir, fileDate.Format("2006-01-02")), nil
 	}
 
 	return filepath.Join(targetDir, fmt.Sprintf("%02d", int(fileDate.Month()))), nil

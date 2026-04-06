@@ -23,10 +23,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -41,22 +39,25 @@ type Progress struct {
 // TODO: Add more options
 // TODO: Disable checkboxes when processing
 type ProcessOptions struct {
-	UseSymlinks         bool
-	WriteMetadata       bool
-	MonthSubfolders     bool
-	IgnoreAlbums        bool
-	Flatten             bool
-	RestoreMOVExtension bool // See issue #2
+	UseSymlinks               bool
+	WriteMetadata             bool
+	MonthSubfolders           bool
+	IgnoreAlbums              bool
+	Flatten                   bool
+	RestoreMOVExtension       bool // See issue #2
 	UseFilenameTimestamp       bool
 	PreferFilenameOverSidecar bool
+	DateFolders               bool
+	AppendDateToFilename     bool
 }
 
 type FixerContext struct {
 	Ctx        context.Context
-	SourceRoot string
-	OutputRoot string
-	Options    ProcessOptions
-	ProgressCh chan<- Progress
+	SourceRoot  string
+	AllRoots    []string
+	OutputRoot  string
+	Options     ProcessOptions
+	ProgressCh  chan<- Progress
 }
 
 // Process is the main fixer entry point.
@@ -139,6 +140,8 @@ func Process(
 			return err
 		}
 
+		fixerCtx.AllRoots = roots
+
 		for _, root := range roots {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -193,7 +196,6 @@ func Process(
 	return nil
 }
 
-// Process a directory and fix all files within the directory. Ignores sub-directories.
 func ProcessDirectory(
 	fixerCtx *FixerContext,
 	dirPath string,
@@ -211,85 +213,32 @@ func ProcessDirectory(
 		return p
 	}
 
-	jobs := make(chan string, runtime.NumCPU()*2)
-	completed := make(chan string)
-	errors := make(chan error)
-
 	sourceDirName := filepath.Base(dirPath)
 
-	var wg sync.WaitGroup
-	workerCount := runtime.NumCPU() * 2
-
-	for i := 0; i < workerCount; i++ {
-		go func() {
-			for imagePath := range jobs {
-				if fixerCtx.Ctx.Err() != nil {
-					wg.Done()
-					continue
-				}
-				err := ProcessFile(fixerCtx, imagePath, sourceDirName, isYearFolder)
-				if err != nil {
-					errors <- fmt.Errorf("error processing file %s: %w", imagePath, err)
-				} else {
-					completed <- imagePath
-				}
-				wg.Done()
-			}
-		}()
-	}
-
-	go func() {
-		for _, file := range files {
-			if fixerCtx.Ctx.Err() != nil {
-				break
-			}
-			if file.IsDir() {
-				continue
-			}
-
-			imagePath := filepath.Join(dirPath, file.Name())
-
-			if !IsMediaFile(imagePath) {
-				continue
-			}
-
-			wg.Add(1)
-			select {
-			case jobs <- imagePath:
-			case <-fixerCtx.Ctx.Done():
-				wg.Done()
-			}
+	for _, file := range files {
+		if fixerCtx.Ctx.Err() != nil {
+			break
 		}
-		close(jobs)
-	}()
-
-	go func() {
-		wg.Wait()
-		close(completed)
-		close(errors)
-	}()
-
-	for completed != nil || errors != nil {
-		select {
-		case ev, ok := <-completed:
-			if !ok {
-				completed = nil
-			} else {
-				p.Processed++
-				p.Succeeded++
-				p.Current = ev
-				fixerCtx.ProgressCh <- p
-			}
-		case err, ok := <-errors:
-			if !ok {
-				errors = nil
-			} else {
-				p.Processed++
-				p.Failed++
-				Log(LoggerError, "%v", err)
-				fixerCtx.ProgressCh <- p
-			}
+		if file.IsDir() {
+			continue
 		}
+
+		imagePath := filepath.Join(dirPath, file.Name())
+
+		if !IsMediaFile(imagePath) {
+			continue
+		}
+
+		err := ProcessFile(fixerCtx, imagePath, sourceDirName, isYearFolder)
+		p.Processed++
+		p.Current = imagePath
+		if err != nil {
+			p.Failed++
+			Log(LoggerError, "Error processing file %s: %v", imagePath, err)
+		} else {
+			p.Succeeded++
+		}
+		fixerCtx.ProgressCh <- p
 	}
 
 	return p
@@ -345,6 +294,17 @@ func ProcessFile(
 	outputDir, err := ResolveOutputDir(fixerCtx, sourcePath, sidecarPath, sourceDirName, isYearFolder)
 	if err != nil {
 		return err
+	}
+
+	if fixerCtx.Options.AppendDateToFilename {
+		if fileDate, err := DetectFileDate(sourcePath, sidecarPath); err == nil {
+			dateSuffix := fileDate.Format("2006-01-02 15.04")
+			ext := filepath.Ext(fileName)
+			base := strings.TrimSuffix(fileName, ext)
+			if !strings.Contains(base, dateSuffix[:10]) {
+				fileName = base + " " + dateSuffix + ext
+			}
+		}
 	}
 
 	destPath := deduplicatePath(filepath.Join(outputDir, fileName))
