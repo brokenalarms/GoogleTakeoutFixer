@@ -299,7 +299,7 @@ func ProcessFile(
 
 	//destPath := filepath.Join(outputPath, fileName)
 
-	sidecarPath, err := FindSidecar(sourcePath)
+	sidecarPath, err := FindSidecar(sourcePath, fixerCtx)
 
 	if err != nil {
 		Log(LoggerError, "Error finding sidecar for file %s: %v", sourcePath, err)
@@ -310,7 +310,7 @@ func ProcessFile(
 	if sidecarPath == "" && IsVideoFile(sourcePath) {
 		partnerImage, err := FindImagePartner(sourcePath)
 		if err == nil && partnerImage != "" {
-			partnerSidecar, err := FindSidecar(partnerImage)
+			partnerSidecar, err := FindSidecar(partnerImage, fixerCtx)
 			if err == nil && partnerSidecar != "" {
 				sidecarPath = partnerSidecar
 			}

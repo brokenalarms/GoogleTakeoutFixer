@@ -139,27 +139,142 @@ func DiscoverDirs(path string) ([]os.DirEntry, error) {
 	return dirList, nil
 }
 
-// Find a matching sidecar JSON
-func FindSidecar(imagePath string) (string, error) {
-	// Scan directory non case sensitively for JSON sidecar files
-	dir := filepath.Dir(imagePath)
-	base := strings.TrimSuffix(filepath.Base(imagePath), filepath.Ext(imagePath))
-	prefix := strings.ToLower(base)
+// Find a matching sidecar JSON by searching in multiple locations.
+func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
+	fileName := filepath.Base(imagePath)
+	Log(LoggerInfo, "FindSidecar: Searching for sidecar for %s", fileName)
 
-	entries, err := ReadDirCached(dir)
+	// Define the core search logic as a closure so we can reuse it.
+	searchLogic := func(dirToSearch string) (string, error) {
+		ext := filepath.Ext(fileName)
+		base := strings.TrimSuffix(fileName, ext)
+
+		entries, err := ReadDirCached(dirToSearch)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return "", nil
+			}
+			return "", err
+		}
+
+		targets := make(map[string]struct{})
+		targets[strings.ToLower(fileName+".json")] = struct{}{}
+		targets[strings.ToLower(base+".json")] = struct{}{}
+		targets[strings.ToLower(fileName+".supplemental-metadata.json")] = struct{}{}
+		targets[strings.ToLower(base+".supplemental-metadata.json")] = struct{}{}
+
+		if strings.Contains(base, "(") && strings.HasSuffix(base, ")") {
+			start := strings.LastIndex(base, "(")
+			parenCleanBase := base[:start]
+			parenSuffix := base[start:]
+			targets[strings.ToLower(parenCleanBase+ext+parenSuffix+".json")] = struct{}{}
+			targets[strings.ToLower(base+".json")] = struct{}{}
+		}
+
+		cleanBase := base
+		wasCleaned := false
+		if strings.HasSuffix(cleanBase, "-edited") {
+			cleanBase = strings.TrimSuffix(cleanBase, "-edited")
+			wasCleaned = true
+		}
+		if regexp.MustCompile(`\([0-9]+\)$`).MatchString(cleanBase) {
+			cleanBase = regexp.MustCompile(`\([0-9]+\)$`).ReplaceAllString(cleanBase, "")
+			wasCleaned = true
+		}
+		if regexp.MustCompile(`~[0-9]+$`).MatchString(cleanBase) {
+			cleanBase = regexp.MustCompile(`~[0-9]+$`).ReplaceAllString(cleanBase, "")
+			wasCleaned = true
+		}
+
+		if wasCleaned {
+			targets[strings.ToLower(cleanBase+ext+".json")] = struct{}{}
+			targets[strings.ToLower(cleanBase+".json")] = struct{}{}
+			targets[strings.ToLower(cleanBase+ext+".supplemental-metadata.json")] = struct{}{}
+			targets[strings.ToLower(cleanBase+".supplemental-metadata.json")] = struct{}{}
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				if _, ok := targets[strings.ToLower(entry.Name())]; ok {
+					return filepath.Join(dirToSearch, entry.Name()), nil
+				}
+			}
+		}
+
+		prefix := strings.ToLower(cleanBase)
+		if len(prefix) > 47 {
+			prefix = prefix[:47]
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				lower := strings.ToLower(entry.Name())
+				if strings.HasSuffix(lower, ".json") && strings.HasPrefix(lower, prefix) {
+					return filepath.Join(dirToSearch, entry.Name()), nil
+				}
+			}
+		}
+		return "", nil
+	}
+
+	// --- Phase 1: Search in the same directory as the media file ---
+	currentDir := filepath.Dir(imagePath)
+	sidecarPath, err := searchLogic(currentDir)
 	if err != nil {
 		return "", err
 	}
+	if sidecarPath != "" {
+		Log(LoggerInfo, "FindSidecar: SUCCESS, found sidecar in local directory.")
+		return sidecarPath, nil
+	}
 
-	for _, entry := range entries {
-		name := entry.Name()
-		lower := strings.ToLower(name)
-		if strings.HasPrefix(lower, prefix) && strings.HasSuffix(lower, ".json") {
-			return filepath.Join(dir, name), nil
+	// --- Phase 2: If not found, search in the root of the Google Photos folder ---
+	if fixerCtx != nil && currentDir != fixerCtx.SourceRoot {
+		Log(LoggerInfo, "FindSidecar: Not found locally. Searching in root: %s", fixerCtx.SourceRoot)
+		sidecarPath, err = searchLogic(fixerCtx.SourceRoot)
+		if err != nil {
+			return "", err
+		}
+		if sidecarPath != "" {
+			Log(LoggerInfo, "FindSidecar: SUCCESS, found sidecar in root directory.")
+			return sidecarPath, nil
 		}
 	}
 
+	// --- Phase 3: If still not found, check the corresponding "Photos from YYYY" folder ---
+	year := extractYearFromFileName(fileName)
+	if year != "" && fixerCtx != nil {
+		yearFolderNames := []string{"Photos from " + year, year}
+		for _, yearFolderName := range yearFolderNames {
+			yearFolderPath := filepath.Join(fixerCtx.SourceRoot, yearFolderName)
+			if _, statErr := os.Stat(yearFolderPath); statErr == nil {
+				Log(LoggerInfo, "FindSidecar: Not found. Searching in year folder: %s", yearFolderPath)
+				sidecarPath, err = searchLogic(yearFolderPath)
+				if err != nil {
+					return "", err
+				}
+				if sidecarPath != "" {
+					Log(LoggerInfo, "FindSidecar: SUCCESS, found sidecar in year folder.")
+					return sidecarPath, nil
+				}
+			}
+		}
+	}
+
+	Log(LoggerWarn, "FindSidecar: FAILED to find any sidecar for %s in any location.", fileName)
 	return "", nil
+}
+
+func extractYearFromFileName(fileName string) string {
+	if strings.HasPrefix(fileName, "PXL_") || strings.HasPrefix(fileName, "IMG_") {
+		if len(fileName) >= 8 {
+			return fileName[4:8]
+		}
+	}
+	re := regexp.MustCompile(`^(19|20)\d{2}-\d{2}-\d{2}`)
+	if re.MatchString(fileName) {
+		return fileName[0:4]
+	}
+	return ""
 }
 
 // Checks if the file at the given path has the specified extension
