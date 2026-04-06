@@ -50,6 +50,7 @@ func Main() {
 	var ignoreAlbums bool = false
 	var monthSubfolders bool = false
 	var restoreMOVExtension bool = false
+	var useFilenameTimestamp bool = false
 
 	progressLabel := widget.NewLabel("Ready to start")
 	progressLabel.Truncation = fyne.TextTruncateEllipsis
@@ -110,6 +111,21 @@ func Main() {
 		fmt.Println("restore MOV extension", restoreMOVExtension)
 	})
 
+	filenameTimestampHint := widget.NewLabel("Prefer date from filename over sidecar metadata for sorting.\nFalls back to sidecar when no date is found in the filename.")
+	filenameTimestampHint.Wrapping = fyne.TextWrapWord
+	filenameTimestampHint.TextStyle = fyne.TextStyle{Italic: true}
+	filenameTimestampHint.Hide()
+
+	useFilenameTimestampCheckbox := widget.NewCheck("Use filename timestamp (YYYYMMDD / YYYY-MM-DD)", func(value bool) {
+		useFilenameTimestamp = value
+		if value {
+			filenameTimestampHint.Show()
+		} else {
+			filenameTimestampHint.Hide()
+		}
+	})
+	useFilenameTimestampCheckbox.SetChecked(useFilenameTimestamp)
+
 	// Fix conflicting options
 	updateCheckboxStates := func() {
 		setEnabled := func(cb *widget.Check, enabled bool) {
@@ -154,6 +170,7 @@ func Main() {
 		monthSubfoldersCheckbox.Disable()
 		flattenCheckbox.Disable()
 		restoreMOVExtensionCheckbox.Disable()
+		useFilenameTimestampCheckbox.Disable()
 
 		fixer.Log(fixer.LoggerInfo, "Processing...")
 		progressBar.SetValue(0)
@@ -170,7 +187,8 @@ func Main() {
 			Flatten:             flatten,
 			IgnoreAlbums:        ignoreAlbums,
 			MonthSubfolders:     monthSubfolders,
-			RestoreMOVExtension: restoreMOVExtension,
+			RestoreMOVExtension:  restoreMOVExtension,
+			UseFilenameTimestamp: useFilenameTimestamp,
 		}
 		go func() {
 			if err := fixer.Process(ctx, inputPath, outputPath, progressCh, opts); err != nil {
@@ -235,6 +253,7 @@ func Main() {
 				// Manually re-enable restoreMOVExtensionCheckbox and writeMetadataCheckbox
 				// since they are not affected by other checboxes in updateCheckboxStates
 				restoreMOVExtensionCheckbox.Enable()
+				useFilenameTimestampCheckbox.Enable()
 				writeMetadataCheckbox.Enable()
 				// Re-enable checboxes based on current states
 				updateCheckboxStates()
@@ -319,6 +338,7 @@ func Main() {
 		monthSubfoldersCheckbox,
 		flattenCheckbox,
 		restoreMOVExtensionCheckbox,
+		useFilenameTimestampCheckbox,
 	)
 
 	StartCancelRow := container.NewGridWithColumns(2, startButton, cancelButton)
@@ -330,6 +350,7 @@ func Main() {
 		folderButtons,
 		FolderSeperator,
 		CheckBoxRow,
+		filenameTimestampHint,
 		OptionsSeparator,
 		StartCancelRow,
 		progressBar,

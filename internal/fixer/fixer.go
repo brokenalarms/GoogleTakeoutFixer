@@ -44,7 +44,8 @@ type ProcessOptions struct {
 	MonthSubfolders     bool
 	IgnoreAlbums        bool
 	Flatten             bool
-	RestoreMOVExtension bool // See issue #2
+	RestoreMOVExtension  bool // See issue #2
+	UseFilenameTimestamp bool
 }
 
 type FixerContext struct {
@@ -371,9 +372,9 @@ func CreateFixedFile(
 	if fixerCtx.Options.UseSymlinks && !isYearFolder {
 		monthFolder := ""
 		if fixerCtx.Options.MonthSubfolders {
-			month, err := DetectFileMonth(filePath, fileMetadataPath)
+			fileDate, err := DetectFileDate(filePath, fileMetadataPath)
 			if err == nil {
-				monthFolder = strconv.Itoa(month)
+				monthFolder = strconv.Itoa(int(fileDate.Month()))
 			}
 		}
 

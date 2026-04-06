@@ -167,36 +167,34 @@ func IsNameExtension(extension string, path string) bool {
 	return strings.EqualFold(filepath.Ext(path), extension)
 }
 
+// yearPrefixes is mostly made by AI. I have not verified these, but i assume they are primarily correct.
+// Please create an issue if you find any mistakes or if you want to add more languages.
+var yearPrefixes = []string{
+	"Photos from ",     // English
+	"Fotos von ",       // German
+	"Photos de ",       // French
+	"Foto del ",        // Italian
+	"Fotos de ",        // Spanish / Portuguese
+	"Foto's van ",      // Dutch
+	"Zdjęcia z ",       // Polish
+	"Фотографии из ",   // Russian
+	"Foton från ",      // Swedish
+	"Bilder fra ",      // Norwegian
+	"Billeder fra ",    // Danish
+	"Fotoğraflar ",     // Turkish
+	"Fotografie z ",    // Czech
+	"Fotók a ",         // Hungarian
+	"Φωτογραφίες από ", // Greek
+	"Fotografii din ",  // Romanian
+	"Foto dari ",       // Indonesian
+	"รูปภาพจาก ",       // Thai
+	"Ảnh từ ",          // Vietnamese
+}
+
 // Checks whether a directory is a standart google year folder
 func IsYearFolder(dirPath string) (bool, error) {
-	// Year folder prefixes of some countries
-	// yearPrefixes is mostly made by AI. I have not verified these, but i assume they are primarily correct.
-	// Please create an issue if you find any mistakes or if you want to add more languages.
-	yearPrefixes := []string{
-		"Photos from ",     // English
-		"Fotos von ",       // German
-		"Photos de ",       // French
-		"Foto del ",        // Italian
-		"Fotos de ",        // Spanish / Portuguese
-		"Foto's van ",      // Dutch
-		"Zdjęcia z ",       // Polish
-		"Фотографии из ",   // Russian
-		"Foton från ",      // Swedish
-		"Bilder fra ",      // Norwegian
-		"Billeder fra ",    // Danish
-		"Fotoğraflar ",     // Turkish
-		"Fotografie z ",    // Czech
-		"Fotók a ",         // Hungarian
-		"Φωτογραφίες από ", // Greek
-		"Fotografii din ",  // Romanian
-		"Foto dari ",       // Indonesian
-		"รูปภาพจาก ",       // Thai
-		"Ảnh từ ",          // Vietnamese
-	}
-
 	for _, prefix := range yearPrefixes {
 		if strings.HasPrefix(dirPath, prefix) {
-			// The rest of the string has to be 4 characters long
 			yearPart := strings.TrimPrefix(dirPath, prefix)
 			if matched, _ := regexp.MatchString(`^\d{4}$`, yearPart); matched {
 				return true, nil
@@ -204,6 +202,15 @@ func IsYearFolder(dirPath string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func ExtractYearFromFolder(dirName string) string {
+	for _, prefix := range yearPrefixes {
+		if strings.HasPrefix(dirName, prefix) {
+			return strings.TrimPrefix(dirName, prefix)
+		}
+	}
+	return dirName
 }
 
 // Checks whether a file, that is provided using its path, is a media file
@@ -276,29 +283,60 @@ func CountProcessableFiles(sourcePath string) (int, error) {
 	return count, nil
 }
 
-// Detect the month of a file based on its sidecar metadata
-// Returns the month as an integer between 1 and 12
-func DetectFileMonth(sourcePath string, sidecarPath string) (int, error) {
+// DetectFileDate returns the file's date from sidecar metadata, or if unavailable, from the filename
+func DetectFileDate(sourcePath string, sidecarPath string) (time.Time, error) {
 	if sidecarPath != "" {
 		metadata, err := ReadJsonMetadata(sidecarPath)
-		if err != nil {
-			return 0, err
+		if err == nil {
+			timestamp, err := strconv.ParseInt(metadata.PhotoTakenTime.Timestamp, 10, 64)
+			if err == nil {
+				return time.Unix(timestamp, 0), nil
+			}
 		}
-
-		timestamp, err := strconv.ParseInt(metadata.PhotoTakenTime.Timestamp, 10, 64)
-		if err != nil {
-			return 0, err
-		}
-
-		return int(time.Unix(timestamp, 0).Month()), nil
 	}
 
-	fileInfo, err := os.Stat(sourcePath)
-	if err != nil {
-		return 0, err
+	fileName := filepath.Base(sourcePath)
+	if t, ok := parseDateFromFileName(fileName); ok {
+		return t, nil
 	}
 
-	return int(fileInfo.ModTime().Month()), nil
+	return time.Time{}, fmt.Errorf("no date found for %s", filepath.Base(sourcePath))
+}
+
+const dateSep = `[-:._]?`
+const dateTimeSep = `[-:._ ]?`
+
+var dateTimeRe = regexp.MustCompile(
+	`(?:^|[^0-9])` +
+		`(\d{4})` + dateSep + `(\d{2})` + dateSep + `(\d{2})` +
+		`(?:` + dateTimeSep + `(\d{2})` + dateSep + `(\d{2})` + dateSep + `(\d{2}))?`,
+)
+
+func parseDateFromFileName(fileName string) (time.Time, bool) {
+	name := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+
+	m := dateTimeRe.FindStringSubmatch(name)
+	if m == nil {
+		return time.Time{}, false
+	}
+
+	year, _ := strconv.Atoi(m[1])
+	month, _ := strconv.Atoi(m[2])
+	day, _ := strconv.Atoi(m[3])
+
+	if year < 1970 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+
+	hour, min, sec := 0, 0, 0
+	if m[4] != "" {
+		hour, _ = strconv.Atoi(m[4])
+		min, _ = strconv.Atoi(m[5])
+		sec, _ = strconv.Atoi(m[6])
+	}
+
+	t := time.Date(year, time.Month(month), day, hour, min, sec, 0, time.UTC)
+	return t, true
 }
 
 func ResolveOutputDir(
@@ -313,7 +351,28 @@ func ResolveOutputDir(
 	}
 
 	targetDir := fixerCtx.OutputRoot
-	if sourceDirName != "" /*&& !fixerCtx.Options.IgnoreAlbums && !isYearFolder*/ {
+
+	if isYearFolder {
+		folderYear := ExtractYearFromFolder(sourceDirName)
+		fileName := filepath.Base(sourcePath)
+		fileNameDate, hasFileNameDate := parseDateFromFileName(fileName)
+
+		if fixerCtx.Options.UseFilenameTimestamp && hasFileNameDate {
+			detectedYear := strconv.Itoa(fileNameDate.Year())
+			if detectedYear != folderYear {
+				Log(LoggerInfo, "Re-sorting %s from %s to %s (filename timestamp)", fileName, folderYear, detectedYear)
+			}
+			targetDir = filepath.Join(targetDir, detectedYear)
+		} else {
+			if hasFileNameDate {
+				fileNameYear := strconv.Itoa(fileNameDate.Year())
+				if fileNameYear != folderYear {
+					Log(LoggerWarn, "File %s has filename date %d but is in year folder %s (enable 'Use filename timestamp' to re-sort)", fileName, fileNameDate.Year(), folderYear)
+				}
+			}
+			targetDir = filepath.Join(targetDir, folderYear)
+		}
+	} else if sourceDirName != "" {
 		targetDir = filepath.Join(targetDir, sourceDirName)
 	}
 
@@ -321,10 +380,17 @@ func ResolveOutputDir(
 		return targetDir, nil
 	}
 
-	month, err := DetectFileMonth(sourcePath, sidecarPath)
-	if err != nil {
-		return "", err
+	if fixerCtx.Options.UseFilenameTimestamp {
+		fileName := filepath.Base(sourcePath)
+		if t, ok := parseDateFromFileName(fileName); ok {
+			return filepath.Join(targetDir, fmt.Sprintf("%02d", int(t.Month()))), nil
+		}
 	}
 
-	return filepath.Join(targetDir, strconv.Itoa(month)), nil
+	fileDate, err := DetectFileDate(sourcePath, sidecarPath)
+	if err != nil {
+		return targetDir, nil
+	}
+
+	return filepath.Join(targetDir, fmt.Sprintf("%02d", int(fileDate.Month()))), nil
 }
