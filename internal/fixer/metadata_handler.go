@@ -218,7 +218,7 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 	}
 
 	if exifErr != nil {
-		return exifErr
+		Log(LoggerWarn, "Exiftool can't write metadata to %s: %v", filepath.Base(filePath), exifErr)
 	}
 
 	if err := exifToolScanner.Err(); err != nil {
