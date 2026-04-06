@@ -28,6 +28,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/feloex/GoogleTakeoutFixer/internal/fixer"
@@ -384,23 +385,26 @@ func Main() {
 		outputButton,
 	)
 
-	CheckBoxRow := container.NewGridWithColumns(
-		2,
+	leftColumn := container.NewVBox(
 		useLinksCheckbox,
-		writeMetadataCheckbox,
 		ignoreAlbumsCheckbox,
-		monthSubfoldersCheckbox,
 		flattenCheckbox,
-		dateFoldersCheckbox,
-		restoreMOVExtensionCheckbox,
-		appendDateCheckbox,
-		dedupCheckbox,
-	)
-
-	filenameTimestampGroup := container.NewVBox(
 		useFilenameTimestampCheckbox,
 		container.NewPadded(preferFilenameOverSidecarCheckbox),
+		layout.NewSpacer(),
 	)
+
+	rightColumn := container.NewVBox(
+		writeMetadataCheckbox,
+		monthSubfoldersCheckbox,
+		dateFoldersCheckbox,
+		appendDateCheckbox,
+		restoreMOVExtensionCheckbox,
+		dedupCheckbox,
+		layout.NewSpacer(),
+	)
+
+	CheckBoxRow := container.NewGridWithColumns(2, leftColumn, rightColumn)
 
 	StartCancelRow := container.NewGridWithColumns(2, startButton, cancelButton)
 
@@ -411,7 +415,6 @@ func Main() {
 		folderButtons,
 		OutputSeparator,
 		CheckBoxRow,
-		filenameTimestampGroup,
 		OptionsSeparator,
 		StartCancelRow,
 		progressBar,
