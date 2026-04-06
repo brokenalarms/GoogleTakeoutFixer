@@ -235,6 +235,63 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 	return nil
 }
 
+// ReadExifDate reads DateTimeOriginal from a file's existing EXIF data
+func ReadExifDate(filePath string) (time.Time, error) {
+	exifToolMutex.Lock()
+	defer exifToolMutex.Unlock()
+
+	if exifToolCmd == nil {
+		return time.Time{}, fmt.Errorf("exiftool not initialized")
+	}
+
+	if _, err := fmt.Fprintf(exifToolStdin, "-DateTimeOriginal\n-CreateDate\n-s3\n-charset\nfilename=utf8\n%s\n-execute\n", filePath); err != nil {
+		return time.Time{}, err
+	}
+
+	var dateStr string
+	for exifToolScanner.Scan() {
+		line := exifToolScanner.Text()
+		if line == "{ready}" {
+			break
+		}
+		if dateStr == "" && !strings.Contains(line, "Error") && strings.TrimSpace(line) != "" {
+			dateStr = strings.TrimSpace(line)
+		}
+	}
+
+	if err := exifToolScanner.Err(); err != nil {
+		return time.Time{}, err
+	}
+
+	if dateStr == "" {
+		return time.Time{}, fmt.Errorf("no EXIF date found")
+	}
+
+	for _, layout := range []string{
+		"2006:01:02 15:04:05",
+		"2006:01:02 15:04:05-07:00",
+		"2006:01:02 15:04:05+07:00",
+	} {
+		if t, err := time.Parse(layout, dateStr); err == nil {
+			return t, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("could not parse EXIF date: %s", dateStr)
+}
+
+func SetFileBirthTime(filePath string, t time.Time) error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	setfileFormat := t.Format("01/02/2006 15:04:05")
+	cmd := exec.Command("SetFile", "-d", setfileFormat, filePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("SetFile failed: %v, output: %s", err, string(output))
+	}
+	return nil
+}
+
 // GetMajorBrand reads the MajorBrand tag from a file using the persistent exiftool instance
 func GetMajorBrand(filePath string) (string, error) {
 	exifToolMutex.Lock()

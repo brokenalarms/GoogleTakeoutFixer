@@ -276,21 +276,19 @@ func CountProcessableFiles(sourcePath string) (int, error) {
 	return count, nil
 }
 
-// Detect the month of a file based on its sidecar metadata
-// Returns the month as an integer between 1 and 12
 func DetectFileMonth(sourcePath string, sidecarPath string) (int, error) {
 	if sidecarPath != "" {
 		metadata, err := ReadJsonMetadata(sidecarPath)
-		if err != nil {
-			return 0, err
+		if err == nil {
+			timestamp, err := strconv.ParseInt(metadata.PhotoTakenTime.Timestamp, 10, 64)
+			if err == nil {
+				return int(time.Unix(timestamp, 0).Month()), nil
+			}
 		}
+	}
 
-		timestamp, err := strconv.ParseInt(metadata.PhotoTakenTime.Timestamp, 10, 64)
-		if err != nil {
-			return 0, err
-		}
-
-		return int(time.Unix(timestamp, 0).Month()), nil
+	if exifDate, err := ReadExifDate(sourcePath); err == nil {
+		return int(exifDate.Month()), nil
 	}
 
 	fileInfo, err := os.Stat(sourcePath)
@@ -299,6 +297,42 @@ func DetectFileMonth(sourcePath string, sidecarPath string) (int, error) {
 	}
 
 	return int(fileInfo.ModTime().Month()), nil
+}
+
+const dateSep = `[-:._]?`
+const dateTimeSep = `[-:._ ]?`
+
+var dateTimeRe = regexp.MustCompile(
+	`(?:^|[^0-9])` +
+		`(\d{4})` + dateSep + `(\d{2})` + dateSep + `(\d{2})` +
+		`(?:` + dateTimeSep + `(\d{2})` + dateSep + `(\d{2})` + dateSep + `(\d{2}))?`,
+)
+
+func parseDateFromFileName(fileName string) (time.Time, bool) {
+	name := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+
+	m := dateTimeRe.FindStringSubmatch(name)
+	if m == nil {
+		return time.Time{}, false
+	}
+
+	year, _ := strconv.Atoi(m[1])
+	month, _ := strconv.Atoi(m[2])
+	day, _ := strconv.Atoi(m[3])
+
+	if year < 1970 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+
+	hour, min, sec := 0, 0, 0
+	if m[4] != "" {
+		hour, _ = strconv.Atoi(m[4])
+		min, _ = strconv.Atoi(m[5])
+		sec, _ = strconv.Atoi(m[6])
+	}
+
+	t := time.Date(year, time.Month(month), day, hour, min, sec, 0, time.UTC)
+	return t, true
 }
 
 func ResolveOutputDir(
