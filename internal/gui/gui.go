@@ -42,7 +42,7 @@ func Main() {
 	a := app.New()
 	a.SetIcon(resourceGoogleTakeoutFixerPng)
 	w := a.NewWindow("GoogleTakeoutFixer " + version.Tag)
-	w.Resize(fyne.NewSize(550, 400))
+	w.Resize(fyne.NewSize(700, 400))
 
 	var useSymlinks bool = false
 	var writeMetadata bool = true
@@ -117,20 +117,26 @@ func Main() {
 	})
 	useFilenameTimestampCheckbox.SetChecked(useFilenameTimestamp)
 
-	preferFilenameHint := widget.NewLabel("When a filename date conflicts with the sidecar date,\nuse the filename date for year/month sorting.")
-	preferFilenameHint.Wrapping = fyne.TextWrapWord
-	preferFilenameHint.TextStyle = fyne.TextStyle{Italic: true}
-	preferFilenameHint.Hide()
-
 	preferFilenameOverSidecarCheckbox := widget.NewCheck("Prefer filename over sidecar when dates conflict", func(value bool) {
 		preferFilenameOverSidecar = value
-		if value {
-			preferFilenameHint.Show()
-		} else {
-			preferFilenameHint.Hide()
-		}
 	})
+	preferFilenameOverSidecarCheckbox.Disable()
 	preferFilenameOverSidecarCheckbox.SetChecked(preferFilenameOverSidecar)
+
+	// Wire up dependency: prefer checkbox only enabled when filename timestamp is on
+	origFilenameTimestampOnChanged := useFilenameTimestampCheckbox.OnChanged
+	useFilenameTimestampCheckbox.OnChanged = func(value bool) {
+		if origFilenameTimestampOnChanged != nil {
+			origFilenameTimestampOnChanged(value)
+		}
+		if value {
+			preferFilenameOverSidecarCheckbox.Enable()
+		} else {
+			preferFilenameOverSidecar = false
+			preferFilenameOverSidecarCheckbox.SetChecked(false)
+			preferFilenameOverSidecarCheckbox.Disable()
+		}
+	}
 
 	// Fix conflicting options
 	updateCheckboxStates := func() {
@@ -347,8 +353,11 @@ func Main() {
 		monthSubfoldersCheckbox,
 		flattenCheckbox,
 		restoreMOVExtensionCheckbox,
+	)
+
+	filenameTimestampGroup := container.NewVBox(
 		useFilenameTimestampCheckbox,
-		preferFilenameOverSidecarCheckbox,
+		container.NewPadded(preferFilenameOverSidecarCheckbox),
 	)
 
 	StartCancelRow := container.NewGridWithColumns(2, startButton, cancelButton)
@@ -360,7 +369,7 @@ func Main() {
 		folderButtons,
 		FolderSeperator,
 		CheckBoxRow,
-		preferFilenameHint,
+		filenameTimestampGroup,
 		OptionsSeparator,
 		StartCancelRow,
 		progressBar,
