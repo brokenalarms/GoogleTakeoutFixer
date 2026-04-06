@@ -140,6 +140,9 @@ func Process(
 		}
 
 		for _, root := range roots {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			fixerCtx.SourceRoot = root
 			Log(LoggerInfo, "Processing source root: %s", root)
 
@@ -198,26 +201,25 @@ func ProcessDirectory(
 	isYearFolder bool,
 	p Progress,
 ) Progress {
+	if fixerCtx.Ctx.Err() != nil {
+		return p
+	}
+
 	files, err := os.ReadDir(dirPath)
 	if err != nil {
 		Log(LoggerError, "Error reading directory: %v", err)
 		return p
 	}
 
-	// TODO: Fix potential race conditions
-	// Job pools
-	// Buffered channel to avoid blocking
-	jobs := make(chan string, len(files))
+	jobs := make(chan string, runtime.NumCPU()*2)
 	completed := make(chan string)
-	// Channel to capture errors
 	errors := make(chan error)
 
 	sourceDirName := filepath.Base(dirPath)
 
 	var wg sync.WaitGroup
-	workerCount := runtime.NumCPU() * 2 // x2 is faster for IO tasks, x more than that has no effect based on testing
+	workerCount := runtime.NumCPU() * 2
 
-	// Start worker goroutines
 	for i := 0; i < workerCount; i++ {
 		go func() {
 			for imagePath := range jobs {
@@ -236,40 +238,38 @@ func ProcessDirectory(
 		}()
 	}
 
-	// Send jobs directly, add work group before transmitting job
-	for _, file := range files {
-		if fixerCtx.Ctx.Err() != nil {
-			break
+	go func() {
+		for _, file := range files {
+			if fixerCtx.Ctx.Err() != nil {
+				break
+			}
+			if file.IsDir() {
+				continue
+			}
+
+			imagePath := filepath.Join(dirPath, file.Name())
+
+			if !IsMediaFile(imagePath) {
+				continue
+			}
+
+			wg.Add(1)
+			select {
+			case jobs <- imagePath:
+			case <-fixerCtx.Ctx.Done():
+				wg.Done()
+			}
 		}
-		if file.IsDir() {
-			continue
-		}
+		close(jobs)
+	}()
 
-		imagePath := filepath.Join(dirPath, file.Name())
-
-		// Check whether a file is a media file
-		if !IsMediaFile(imagePath) {
-			Log(LoggerDebug, "Skipping non-media file: %s", imagePath)
-			continue
-		}
-
-		Log(LoggerDebug, "Queuing media file: %s", imagePath)
-		wg.Add(1)
-		jobs <- imagePath
-	}
-
-	// All jobs have been sent
-	close(jobs)
-
-	// Close completed and errors channels when all jobs are finished
 	go func() {
 		wg.Wait()
 		close(completed)
 		close(errors)
 	}()
 
-	// Update progress and handle errors
-	for {
+	for completed != nil || errors != nil {
 		select {
 		case ev, ok := <-completed:
 			if !ok {
@@ -289,12 +289,6 @@ func ProcessDirectory(
 				Log(LoggerError, "%v", err)
 				fixerCtx.ProgressCh <- p
 			}
-		case <-fixerCtx.Ctx.Done():
-			// Let workers finish their current job but dont add new jobs
-		}
-
-		if completed == nil && errors == nil {
-			break
 		}
 	}
 
@@ -309,6 +303,10 @@ func ProcessFile(
 	sourceDirName string,
 	isYearFolder bool,
 ) error {
+	if fixerCtx.Ctx.Err() != nil {
+		return fixerCtx.Ctx.Err()
+	}
+
 	fileName := filepath.Base(sourcePath)
 
 	// See issue #2
