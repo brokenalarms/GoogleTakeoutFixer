@@ -357,20 +357,25 @@ func ResolveOutputDir(
 		fileName := filepath.Base(sourcePath)
 		fileNameDate, hasFileNameDate := parseDateFromFileName(fileName)
 
-		if fixerCtx.Options.UseFilenameTimestamp && hasFileNameDate {
+		if fixerCtx.Options.PreferFilenameOverSidecar && hasFileNameDate {
 			detectedYear := strconv.Itoa(fileNameDate.Year())
 			if detectedYear != folderYear {
-				Log(LoggerInfo, "Re-sorting %s from %s to %s (filename timestamp)", fileName, folderYear, detectedYear)
+				Log(LoggerInfo, "Re-sorting %s from %s to %s (filename timestamp preferred over sidecar)", fileName, folderYear, detectedYear)
 			}
 			targetDir = filepath.Join(targetDir, detectedYear)
 		} else {
-			if hasFileNameDate {
-				fileNameYear := strconv.Itoa(fileNameDate.Year())
-				if fileNameYear != folderYear {
-					Log(LoggerWarn, "File %s has filename date %d but is in year folder %s (enable 'Use filename timestamp' to re-sort)", fileName, fileNameDate.Year(), folderYear)
+			fileDate, err := DetectFileDate(sourcePath, sidecarPath)
+			if err == nil {
+				detectedYear := strconv.Itoa(fileDate.Year())
+				if detectedYear != folderYear {
+					if hasFileNameDate {
+						Log(LoggerWarn, "File %s has filename date %d but sidecar/EXIF says %d (enable 'Prefer filename over sidecar' to use filename)", fileName, fileNameDate.Year(), fileDate.Year())
+					}
 				}
+				targetDir = filepath.Join(targetDir, detectedYear)
+			} else {
+				targetDir = filepath.Join(targetDir, folderYear)
 			}
-			targetDir = filepath.Join(targetDir, folderYear)
 		}
 	} else if sourceDirName != "" {
 		targetDir = filepath.Join(targetDir, sourceDirName)
@@ -380,7 +385,7 @@ func ResolveOutputDir(
 		return targetDir, nil
 	}
 
-	if fixerCtx.Options.UseFilenameTimestamp {
+	if fixerCtx.Options.PreferFilenameOverSidecar {
 		fileName := filepath.Base(sourcePath)
 		if t, ok := parseDateFromFileName(fileName); ok {
 			return filepath.Join(targetDir, fmt.Sprintf("%02d", int(t.Month()))), nil

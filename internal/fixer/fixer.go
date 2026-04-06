@@ -44,8 +44,9 @@ type ProcessOptions struct {
 	MonthSubfolders     bool
 	IgnoreAlbums        bool
 	Flatten             bool
-	RestoreMOVExtension  bool // See issue #2
-	UseFilenameTimestamp bool
+	RestoreMOVExtension       bool // See issue #2
+	UseFilenameTimestamp      bool
+	PreferFilenameOverSidecar bool
 }
 
 type FixerContext struct {
