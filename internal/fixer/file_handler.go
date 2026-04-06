@@ -573,10 +573,6 @@ func DetectFileDate(sourcePath string, sidecarPath string) (time.Time, error) {
 		return t, nil
 	}
 
-	if exifDate, err := ReadExifDate(sourcePath); err == nil {
-		return exifDate, nil
-	}
-
 	return time.Time{}, fmt.Errorf("no date found for %s", filepath.Base(sourcePath))
 }
 

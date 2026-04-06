@@ -345,6 +345,15 @@ func ProcessFile(
 
 		isDuplicate := false
 		if existing, found := FindDuplicateMatch(fixerCtx, originalFileName); found {
+			// Lazy-read EXIF only when a candidate match is found
+			if existing.DateOriginal == "" {
+				date, w, h, _ := ReadExifIdentity(existing.DestPath)
+				existing.DateOriginal = date
+				existing.ImageWidth = w
+				existing.ImageHeight = h
+				RegisterWrittenFile(fixerCtx, originalFileName, existing)
+			}
+
 			newDate, newW, newH, exifErr := ReadExifIdentity(destPath)
 			exifMatch := exifErr == nil && newDate != "" &&
 				newDate == existing.DateOriginal &&
@@ -357,7 +366,7 @@ func ProcessFile(
 				newIsBetter := false
 				if hasSidecar && !existing.HasSidecar {
 					newIsBetter = true
-				} else if hasSidecar == existing.HasSidecar && len(fileName) > existing.BaseNameLen {
+				} else if hasSidecar == existing.HasSidecar && len(originalFileName) > existing.BaseNameLen {
 					newIsBetter = true
 				}
 
@@ -376,10 +385,8 @@ func ProcessFile(
 		}
 
 		if !isDuplicate {
-			date, w, h, _ := ReadExifIdentity(destPath)
 			RegisterWrittenFile(fixerCtx, originalFileName, WrittenFile{
 				DestPath: destPath, HasSidecar: hasSidecar,
-				DateOriginal: date, ImageWidth: w, ImageHeight: h,
 				FileSize: newSize, BaseNameLen: len(originalFileName),
 			})
 		}
