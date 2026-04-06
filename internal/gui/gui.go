@@ -42,7 +42,7 @@ func Main() {
 	a := app.New()
 	a.SetIcon(resourceGoogleTakeoutFixerPng)
 	w := a.NewWindow("GoogleTakeoutFixer " + version.Tag)
-	w.Resize(fyne.NewSize(700, 400))
+	w.Resize(fyne.NewSize(800, 400))
 
 	var useSymlinks bool = false
 	var writeMetadata bool = true
