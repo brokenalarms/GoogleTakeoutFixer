@@ -47,7 +47,8 @@ type ProcessOptions struct {
 	IgnoreAlbums        bool
 	Flatten             bool
 	RestoreMOVExtension bool // See issue #2
-	UseFilenameTimestamp bool
+	UseFilenameTimestamp       bool
+	PreferFilenameOverSidecar bool
 }
 
 type FixerContext struct {
@@ -448,7 +449,19 @@ func CreateFixedFile(
 			}
 		}
 	} else if fixerCtx.Options.WriteMetadata && fileMetadataPath == "" {
-		Log(LoggerInfo, "WriteMetadata enabled but no sidecar for %s — skipping metadata write", fileName)
+		Log(LoggerInfo, "WriteMetadata enabled but no sidecar for %s — attempting EXIF/filename date", fileName)
+
+		if exifDate, err := ReadExifDate(filePath); err == nil {
+			Log(LoggerInfo, "Found EXIF date for %s: %s", fileName, exifDate.Format("2006-01-02 15:04:05"))
+			if err := SetFileBirthTime(destPath, exifDate); err != nil {
+				Log(LoggerWarn, "Failed to set birth time from EXIF for %s: %v", fileName, err)
+			}
+		} else if fileDate, ok := parseDateFromFileName(filepath.Base(filePath)); ok {
+			Log(LoggerInfo, "Using filename date for %s: %s", fileName, fileDate.Format("2006-01-02 15:04:05"))
+			if err := SetFileBirthTime(destPath, fileDate); err != nil {
+				Log(LoggerWarn, "Failed to set birth time from filename for %s: %v", fileName, err)
+			}
+		}
 	}
 
 	return nil

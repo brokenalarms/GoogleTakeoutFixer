@@ -42,7 +42,7 @@ func Main() {
 	a := app.New()
 	a.SetIcon(resourceGoogleTakeoutFixerPng)
 	w := a.NewWindow("GoogleTakeoutFixer " + version.Tag)
-	w.Resize(fyne.NewSize(550, 400))
+	w.Resize(fyne.NewSize(800, 400))
 
 	var useSymlinks bool = false
 	var writeMetadata bool = true
@@ -50,7 +50,8 @@ func Main() {
 	var ignoreAlbums bool = false
 	var monthSubfolders bool = false
 	var restoreMOVExtension bool = false
-	var useFilenameTimestamp bool = false
+	var useFilenameTimestamp bool = true
+	var preferFilenameOverSidecar bool = false
 
 	progressLabel := widget.NewLabel("Ready to start")
 	progressLabel.Truncation = fyne.TextTruncateEllipsis
@@ -111,17 +112,19 @@ func Main() {
 		fmt.Println("restore MOV extension", restoreMOVExtension)
 	})
 
-	filenameTimestampHint := widget.NewLabel("Prefer date from filename over sidecar metadata for sorting.\nFalls back to sidecar when no date is found in the filename.")
-	filenameTimestampHint.Wrapping = fyne.TextWrapWord
-	filenameTimestampHint.TextStyle = fyne.TextStyle{Italic: true}
-	filenameTimestampHint.Hide()
+	preferFilenameOverSidecarCheckbox := widget.NewCheck("Prefer filename over sidecar when dates conflict", func(value bool) {
+		preferFilenameOverSidecar = value
+	})
+	preferFilenameOverSidecarCheckbox.Disable()
 
 	useFilenameTimestampCheckbox := widget.NewCheck("Use filename timestamp (YYYYMMDD / YYYY-MM-DD)", func(value bool) {
 		useFilenameTimestamp = value
 		if value {
-			filenameTimestampHint.Show()
+			preferFilenameOverSidecarCheckbox.Enable()
 		} else {
-			filenameTimestampHint.Hide()
+			preferFilenameOverSidecar = false
+			preferFilenameOverSidecarCheckbox.SetChecked(false)
+			preferFilenameOverSidecarCheckbox.Disable()
 		}
 	})
 
@@ -154,6 +157,7 @@ func Main() {
 	flattenCheckbox.SetChecked(flatten)
 	restoreMOVExtensionCheckbox.SetChecked(restoreMOVExtension)
 	useFilenameTimestampCheckbox.SetChecked(useFilenameTimestamp)
+	preferFilenameOverSidecarCheckbox.SetChecked(preferFilenameOverSidecar)
 
 	// Refresh states once at start
 	updateCheckboxStates()
@@ -190,6 +194,7 @@ func Main() {
 		flattenCheckbox.Disable()
 		restoreMOVExtensionCheckbox.Disable()
 		useFilenameTimestampCheckbox.Disable()
+		preferFilenameOverSidecarCheckbox.Disable()
 
 		fixer.Log(fixer.LoggerInfo, "Processing...")
 		progressBar.SetValue(0)
@@ -207,7 +212,8 @@ func Main() {
 			IgnoreAlbums:        ignoreAlbums,
 			MonthSubfolders:     monthSubfolders,
 			RestoreMOVExtension: restoreMOVExtension,
-			UseFilenameTimestamp:        useFilenameTimestamp,
+			UseFilenameTimestamp:       useFilenameTimestamp,
+			PreferFilenameOverSidecar: preferFilenameOverSidecar,
 		}
 		go func() {
 			if err := fixer.Process(ctx, inputPath, outputPath, progressCh, opts); err != nil {
@@ -274,6 +280,7 @@ func Main() {
 				// since they are not affected by other checboxes in updateCheckboxStates
 				restoreMOVExtensionCheckbox.Enable()
 				useFilenameTimestampCheckbox.Enable()
+				preferFilenameOverSidecarCheckbox.Enable()
 				writeMetadataCheckbox.Enable()
 				// Re-enable checboxes based on current states
 				updateCheckboxStates()
@@ -358,7 +365,11 @@ func Main() {
 		monthSubfoldersCheckbox,
 		flattenCheckbox,
 		restoreMOVExtensionCheckbox,
+	)
+
+	filenameTimestampGroup := container.NewVBox(
 		useFilenameTimestampCheckbox,
+		container.NewPadded(preferFilenameOverSidecarCheckbox),
 	)
 
 	StartCancelRow := container.NewGridWithColumns(2, startButton, cancelButton)
@@ -370,7 +381,7 @@ func Main() {
 		folderButtons,
 		FolderSeperator,
 		CheckBoxRow,
-		filenameTimestampHint,
+		filenameTimestampGroup,
 		OptionsSeparator,
 		StartCancelRow,
 		progressBar,

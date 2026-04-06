@@ -46,7 +46,8 @@ func Main() {
 	monthSubfolders := flag.Bool("month-subfolders", false, "Create month subfolders (1-12) inside year folders")
 	flatten := flag.Bool("flatten", false, "Put all media files directly in the output folder without year/album subfolders")
 	restoreMOV := flag.Bool("restore-mov", false, "Restore .MOV file extension in case the Major Brand EXIF field says \"Apple QuickTime (.MOV/QT)\"")
-	useFilenameTimestamp := flag.Bool("use-filename-timestamp", false, "Use date from filename (YYYYMMDD or YYYY-MM-DD) to determine year folder instead of sidecar metadata")
+	useFilenameTimestamp := flag.Bool("use-filename-timestamp", true, "Use date from filename (YYYYMMDD or YYYY-MM-DD) as a fallback date source")
+	preferFilenameOverSidecar := flag.Bool("prefer-filename-over-sidecar", false, "When filename and sidecar dates conflict, prefer the filename date for sorting")
 
 	flag.Parse()
 
@@ -67,8 +68,8 @@ func Main() {
 		fmt.Println("Error: --flatten and --month-subfolders cannot be used together")
 		os.Exit(1)
 	}
-	if *flatten && *useFilenameTimestamp {
-		fmt.Println("Error: --flatten and --use-filename-timestamp cannot be used together")
+	if *flatten && *preferFilenameOverSidecar {
+		fmt.Println("Error: --flatten and --prefer-filename-over-sidecar cannot be used together")
 		os.Exit(1)
 	}
 	if *useSymlinks && *ignoreAlbums {
@@ -91,7 +92,8 @@ func Main() {
 		IgnoreAlbums:        *ignoreAlbums,
 		MonthSubfolders:     *monthSubfolders,
 		RestoreMOVExtension: *restoreMOV,
-		UseFilenameTimestamp:        *useFilenameTimestamp,
+		UseFilenameTimestamp:       *useFilenameTimestamp,
+		PreferFilenameOverSidecar: *preferFilenameOverSidecar,
 	}
 
 	go func() {

@@ -258,7 +258,10 @@ func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
 	}
 
 	// --- Phase 3: If still not found, check the corresponding "Photos from YYYY" folder ---
-	year := extractYearFromFileName(fileName)
+	var year string
+	if t, ok := parseDateFromFileName(fileName); ok {
+		year = strconv.Itoa(t.Year())
+	}
 	if year != "" && fixerCtx != nil {
 		yearFolderNames := []string{"Photos from " + year, year}
 		for _, yearFolderName := range yearFolderNames {
@@ -281,22 +284,6 @@ func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
 	return "", nil
 }
 
-// New helper function to extract year from common Google Photos filename patterns
-func extractYearFromFileName(fileName string) string {
-	// PXL_YYYYMMDD_... or IMG_YYYYMMDD_...
-	if strings.HasPrefix(fileName, "PXL_") || strings.HasPrefix(fileName, "IMG_") {
-		if len(fileName) >= 8 {
-			return fileName[4:8]
-		}
-	}
-	// YYYY-MM-DD ...
-	re := regexp.MustCompile(`^(19|20)\d{2}-\d{2}-\d{2}`)
-	if re.MatchString(fileName) {
-		return fileName[0:4]
-	}
-	// Other patterns can be added here
-	return ""
-}
 
 // Checks if the file at the given path has the specified extension
 func IsNameExtension(extension string, path string) bool {
@@ -485,7 +472,7 @@ func CountProcessableFiles(sourcePath string) (int, error) {
 	return count, nil
 }
 
-// DetectFileDate returns the file's date from sidecar metadata, or if unavailable, from the filename
+// DetectFileDate returns the file's date from sidecar, EXIF, or filename
 func DetectFileDate(sourcePath string, sidecarPath string) (time.Time, error) {
 	if sidecarPath != "" {
 		metadata, err := ReadJsonMetadata(sidecarPath)
@@ -495,6 +482,10 @@ func DetectFileDate(sourcePath string, sidecarPath string) (time.Time, error) {
 				return time.Unix(timestamp, 0), nil
 			}
 		}
+	}
+
+	if exifDate, err := ReadExifDate(sourcePath); err == nil {
+		return exifDate, nil
 	}
 
 	fileName := filepath.Base(sourcePath)
@@ -559,20 +550,25 @@ func ResolveOutputDir(
 		fileName := filepath.Base(sourcePath)
 		fileNameDate, hasFileNameDate := parseDateFromFileName(fileName)
 
-		if fixerCtx.Options.UseFilenameTimestamp && hasFileNameDate {
+		if fixerCtx.Options.PreferFilenameOverSidecar && hasFileNameDate {
 			detectedYear := strconv.Itoa(fileNameDate.Year())
 			if detectedYear != folderYear {
-				Log(LoggerInfo, "Re-sorting %s from %s to %s (filename timestamp)", fileName, folderYear, detectedYear)
+				Log(LoggerInfo, "Re-sorting %s from %s to %s (filename timestamp preferred over sidecar)", fileName, folderYear, detectedYear)
 			}
 			targetDir = filepath.Join(targetDir, detectedYear)
 		} else {
-			if hasFileNameDate {
-				fileNameYear := strconv.Itoa(fileNameDate.Year())
-				if fileNameYear != folderYear {
-					Log(LoggerWarn, "File %s has filename date %d but is in year folder %s (enable 'Use filename timestamp' to re-sort)", fileName, fileNameDate.Year(), folderYear)
+			fileDate, err := DetectFileDate(sourcePath, sidecarPath)
+			if err == nil {
+				detectedYear := strconv.Itoa(fileDate.Year())
+				if detectedYear != folderYear {
+					if hasFileNameDate {
+						Log(LoggerWarn, "File %s has filename date %d but sidecar/EXIF says %d (enable 'Prefer filename over sidecar' to use filename)", fileName, fileNameDate.Year(), fileDate.Year())
+					}
 				}
+				targetDir = filepath.Join(targetDir, detectedYear)
+			} else {
+				targetDir = filepath.Join(targetDir, folderYear)
 			}
-			targetDir = filepath.Join(targetDir, folderYear)
 		}
 	} else if sourceDirName != "" {
 		targetDir = filepath.Join(targetDir, sourceDirName)
@@ -582,7 +578,7 @@ func ResolveOutputDir(
 		return targetDir, nil
 	}
 
-	if fixerCtx.Options.UseFilenameTimestamp {
+	if fixerCtx.Options.PreferFilenameOverSidecar {
 		fileName := filepath.Base(sourcePath)
 		if t, ok := parseDateFromFileName(fileName); ok {
 			return filepath.Join(targetDir, fmt.Sprintf("%02d", int(t.Month()))), nil
