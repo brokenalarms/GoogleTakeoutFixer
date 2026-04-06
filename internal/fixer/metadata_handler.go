@@ -226,16 +226,36 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 	}
 
 	// Set file birth time (creation date) using macOS SetFile
-	if runtime.GOOS == "darwin" {
-		if err := SetFileBirthTime(filePath, localTime); err != nil {
-			Log(LoggerWarn, "Failed to set birth time for %s: %v", filePath, err)
-		}
+	if err := SetFileBirthTime(filePath, localTime); err != nil {
+		Log(LoggerWarn, "Failed to set birth time for %s: %v", filePath, err)
 	}
 
 	return nil
 }
 
+var (
+	setFileAvailable     bool
+	setFileAvailableOnce sync.Once
+)
+
+func checkSetFileAvailable() bool {
+	setFileAvailableOnce.Do(func() {
+		if runtime.GOOS != "darwin" {
+			return
+		}
+		_, err := exec.LookPath("SetFile")
+		setFileAvailable = err == nil
+		if !setFileAvailable {
+			Log(LoggerWarn, "SetFile not found — install Xcode Command Line Tools (xcode-select --install) to set file creation dates")
+		}
+	})
+	return setFileAvailable
+}
+
 func SetFileBirthTime(filePath string, t time.Time) error {
+	if !checkSetFileAvailable() {
+		return nil
+	}
 	setfileFormat := t.Format("01/02/2006 15:04:05")
 	cmd := exec.Command("SetFile", "-d", setfileFormat, filePath)
 	if output, err := cmd.CombinedOutput(); err != nil {
