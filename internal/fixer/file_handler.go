@@ -119,25 +119,29 @@ func deduplicatePath(path string) string {
 	}
 }
 
-// BaseKey returns a lowercase filename without extension
-func BaseKey(fileName string) string {
-	return strings.ToLower(strings.TrimSuffix(fileName, filepath.Ext(fileName)))
+var trailingParenNum = regexp.MustCompile(`\s*\(\d+\)$`)
+
+// DedupKey returns a canonical lowercase filename for dedup lookup.
+// Strips any trailing parenthesized number like (1), (2) before the extension,
+// which Google adds for duplicate uploads.
+func DedupKey(fileName string) string {
+	ext := filepath.Ext(fileName)
+	base := strings.TrimSuffix(fileName, ext)
+	base = trailingParenNum.ReplaceAllString(base, "")
+	return strings.ToLower(base + ext)
 }
 
-// FindDuplicateMatch checks if a file with a substring-matching base name has already been written
-func FindDuplicateMatch(fixerCtx *FixerContext, fileName string) (WrittenFile, bool) {
-	newKey := BaseKey(fileName)
-	for existingKey, wf := range fixerCtx.WrittenFiles {
-		if strings.Contains(newKey, existingKey) || strings.Contains(existingKey, newKey) {
-			return wf, true
-		}
+// FindDuplicateMatch checks if a file with the same original name has already been written
+func FindDuplicateMatch(fixerCtx *FixerContext, originalFileName string) (WrittenFile, bool) {
+	if wf, ok := fixerCtx.WrittenFiles[DedupKey(originalFileName)]; ok {
+		return wf, true
 	}
 	return WrittenFile{}, false
 }
 
-// RegisterWrittenFile records a file in the dedup map
-func RegisterWrittenFile(fixerCtx *FixerContext, fileName string, wf WrittenFile) {
-	fixerCtx.WrittenFiles[BaseKey(fileName)] = wf
+// RegisterWrittenFile records a file in the dedup map under its original source filename
+func RegisterWrittenFile(fixerCtx *FixerContext, originalFileName string, wf WrittenFile) {
+	fixerCtx.WrittenFiles[DedupKey(originalFileName)] = wf
 }
 
 // MoveToDuplicates moves a file to the _duplicates folder preserving the relative path structure

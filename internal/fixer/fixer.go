@@ -309,6 +309,8 @@ func ProcessFile(
 		return err
 	}
 
+	originalFileName := fileName
+
 	if fixerCtx.Options.AppendDateToFilename {
 		if fileDate, err := DetectFileDate(sourcePath, sidecarPath); err == nil {
 			dateSuffix := fileDate.Format("2006-01-02")
@@ -342,7 +344,7 @@ func ProcessFile(
 		}
 
 		isDuplicate := false
-		if existing, found := FindDuplicateMatch(fixerCtx, fileName); found {
+		if existing, found := FindDuplicateMatch(fixerCtx, originalFileName); found {
 			newDate, newW, newH, exifErr := ReadExifIdentity(destPath)
 			exifMatch := exifErr == nil && newDate != "" &&
 				newDate == existing.DateOriginal &&
@@ -375,10 +377,10 @@ func ProcessFile(
 
 		if !isDuplicate {
 			date, w, h, _ := ReadExifIdentity(destPath)
-			RegisterWrittenFile(fixerCtx, fileName, WrittenFile{
+			RegisterWrittenFile(fixerCtx, originalFileName, WrittenFile{
 				DestPath: destPath, HasSidecar: hasSidecar,
 				DateOriginal: date, ImageWidth: w, ImageHeight: h,
-				FileSize: newSize, BaseNameLen: len(fileName),
+				FileSize: newSize, BaseNameLen: len(originalFileName),
 			})
 		}
 	}
