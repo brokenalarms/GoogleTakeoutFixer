@@ -30,9 +30,10 @@ import (
 	"time"
 )
 
-// Cache for diectory entries to prevent excessive disk reads (issue #5)
+// Cache for directory entries to prevent excessive disk reads (issue #5)
 var (
 	dirCache     = make(map[string][]os.DirEntry)
+	dirLookup    = make(map[string]map[string]string) // dir -> lowercase name -> actual name
 	dirCacheLock sync.RWMutex
 )
 
@@ -62,6 +63,15 @@ func ReadDirCached(dir string) ([]os.DirEntry, error) {
 	}
 	dirCache[dir] = entries
 
+	// Build a lookup map for O(1) case-insensitive search
+	lookup := make(map[string]string)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			lookup[strings.ToLower(entry.Name())] = entry.Name()
+		}
+	}
+	dirLookup[dir] = lookup
+
 	return entries, nil
 }
 
@@ -71,6 +81,7 @@ func ClearCache() {
 	defer dirCacheLock.Unlock()
 	// Reallocate map to clear everything
 	dirCache = make(map[string][]os.DirEntry)
+	dirLookup = make(map[string]map[string]string)
 }
 
 // ClearCacheDir clears the directory cache for a specific path
@@ -78,6 +89,7 @@ func ClearCacheDir(dir string) {
 	dirCacheLock.Lock()
 	defer dirCacheLock.Unlock()
 	delete(dirCache, dir)
+	delete(dirLookup, dir)
 }
 
 // All media extension to differ between media files and other files
@@ -160,6 +172,14 @@ func MoveToDuplicates(fixerCtx *FixerContext, filePath string) error {
 
 // Duplicate a file from one path to another
 func DuplicateFile(inputPath string, outputPath string) error {
+	// On macOS (darwin), try os.Link first for "instant" copies if on same volume
+	if runtime.GOOS == "darwin" {
+		if err := os.Link(inputPath, outputPath); err == nil {
+			return nil
+		}
+		// If Link fails (different volume), fall back to standard copy
+	}
+
 	sourceFile, err := os.Open(inputPath)
 	if err != nil {
 		return err
@@ -205,31 +225,36 @@ func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
 		ext := filepath.Ext(fileName)
 		base := strings.TrimSuffix(fileName, ext)
 
-		entries, err := ReadDirCached(dirToSearch)
+		_, err := ReadDirCached(dirToSearch)
 		if err != nil {
-			if os.IsNotExist(err) { // Don't treat a missing folder as a fatal error
+			if os.IsNotExist(err) {
 				return "", nil
 			}
 			return "", err
 		}
 
-		targets := make(map[string]struct{})
-		targets[strings.ToLower(fileName+".json")] = struct{}{}
-		targets[strings.ToLower(base+".json")] = struct{}{}
-		targets[strings.ToLower(fileName+".supplemental-metadata.json")] = struct{}{}
-		targets[strings.ToLower(base+".supplemental-metadata.json")] = struct{}{}
-		// Double-dot pattern: Google produces "file.mov..json" for some files
-		targets[strings.ToLower(fileName+"."+".json")] = struct{}{}
+		dirCacheLock.RLock()
+		lookup := dirLookup[dirToSearch]
+		entries := dirCache[dirToSearch]
+		dirCacheLock.RUnlock()
 
-		parenSuffix := ""
+		targets := []string{
+			strings.ToLower(fileName + ".json"),
+			strings.ToLower(base + ".json"),
+			strings.ToLower(fileName + ".supplemental-metadata.json"),
+			strings.ToLower(base + ".supplemental-metadata.json"),
+			strings.ToLower(fileName + ".." + ".json"),
+		}
+
 		if strings.Contains(base, "(") && strings.HasSuffix(base, ")") {
 			start := strings.LastIndex(base, "(")
 			parenCleanBase := base[:start]
-			parenSuffix = base[start:]
-			targets[strings.ToLower(parenCleanBase+ext+parenSuffix+".json")] = struct{}{}
-			targets[strings.ToLower(base+".json")] = struct{}{}
-			// supplemental-metadata(N).json where (N) matches the media file's suffix
-			targets[strings.ToLower(parenCleanBase+ext+".supplemental-metadata"+parenSuffix+".json")] = struct{}{}
+			parenSuffix := base[start:]
+			targets = append(targets,
+				strings.ToLower(parenCleanBase+ext+parenSuffix+".json"),
+				strings.ToLower(base+".json"),
+				strings.ToLower(parenCleanBase+ext+".supplemental-metadata"+parenSuffix+".json"),
+			)
 		}
 
 		cleanBase := base
@@ -248,29 +273,31 @@ func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
 		}
 
 		if wasCleaned {
-			targets[strings.ToLower(cleanBase+ext+".json")] = struct{}{}
-			targets[strings.ToLower(cleanBase+".json")] = struct{}{}
-			targets[strings.ToLower(cleanBase+ext+".supplemental-metadata.json")] = struct{}{}
-			targets[strings.ToLower(cleanBase+".supplemental-metadata.json")] = struct{}{}
+			targets = append(targets,
+				strings.ToLower(cleanBase+ext+".json"),
+				strings.ToLower(cleanBase+".json"),
+				strings.ToLower(cleanBase+ext+".supplemental-metadata.json"),
+				strings.ToLower(cleanBase+".supplemental-metadata.json"),
+			)
 		}
 
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				if _, ok := targets[strings.ToLower(entry.Name())]; ok {
-					return filepath.Join(dirToSearch, entry.Name()), nil
-				}
+		// O(1) lookup
+		for _, target := range targets {
+			if actualName, ok := lookup[target]; ok {
+				return filepath.Join(dirToSearch, actualName), nil
 			}
 		}
 
+		// Fallback O(N) only for truncated prefixes
 		prefix := strings.ToLower(cleanBase)
 		if len(prefix) > 46 {
 			prefix = prefix[:46]
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				lower := strings.ToLower(entry.Name())
-				if strings.HasSuffix(lower, ".json") && strings.HasPrefix(lower, prefix) {
-					return filepath.Join(dirToSearch, entry.Name()), nil
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					lower := strings.ToLower(entry.Name())
+					if strings.HasSuffix(lower, ".json") && strings.HasPrefix(lower, prefix) {
+						return filepath.Join(dirToSearch, entry.Name()), nil
+					}
 				}
 			}
 		}
