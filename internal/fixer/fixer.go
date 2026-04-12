@@ -23,36 +23,53 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
 type Progress struct {
 	Total     int
 	Processed int
+	Succeeded int
+	Failed    int
 	Current   string
 }
 
 // TODO: Add more options
 // TODO: Disable checkboxes when processing
 type ProcessOptions struct {
-	UseSymlinks         bool
-	WriteMetadata       bool
-	MonthSubfolders     bool
-	IgnoreAlbums        bool
-	Flatten             bool
-	RestoreMOVExtension bool // See issue #2
+	UseSymlinks               bool
+	WriteMetadata             bool
+	MonthSubfolders           bool
+	IgnoreAlbums              bool
+	Flatten                   bool
+	RestoreMOVExtension       bool // See issue #2
+	UseFilenameTimestamp       bool
+	PreferFilenameOverSidecar bool
+	DateFolders              bool
+	AppendDateToFilename     bool
+	DeduplicateOutput        bool
+}
+
+type WrittenFile struct {
+	DestPath     string
+	HasSidecar   bool
+	DateOriginal string
+	ImageWidth   string
+	ImageHeight  string
+	FileSize     int64
+	BaseNameLen  int
 }
 
 type FixerContext struct {
-	Ctx        context.Context
-	SourceRoot string
-	OutputRoot string
-	Options    ProcessOptions
-	ProgressCh chan<- Progress
+	Ctx         context.Context
+	SourceRoot  string
+	AllRoots    []string
+	OutputRoot  string
+	Options     ProcessOptions
+	ProgressCh  chan<- Progress
+	WrittenFiles map[string]WrittenFile
 }
 
 // Process is the main fixer entry point.
@@ -121,55 +138,77 @@ func Process(
 	}
 
 	fixerCtx := &FixerContext{
-		Ctx:        ctx,
-		SourceRoot: sourcePath,
-		OutputRoot: outputPath,
-		Options:    options,
-		ProgressCh: progressCh,
+		Ctx:          ctx,
+		SourceRoot:   sourcePath,
+		OutputRoot:   outputPath,
+		Options:      options,
+		ProgressCh:   progressCh,
+		WrittenFiles: make(map[string]WrittenFile),
 	}
 
-	// process all directories in the source directory, ignore files in the source directory itself
-	// because all media files should be inside of sub-folders
 	if fileInfo.IsDir() {
-		dirs, err := DiscoverDirs(sourcePath)
+		roots, err := FindSourceRoots(sourcePath)
 		if err != nil {
-			Log(LoggerError, "Error discovering directories: %v", err)
+			Log(LoggerError, "Error finding source roots: %v", err)
+			return err
 		}
 
-		for _, dir := range dirs {
+		fixerCtx.AllRoots = roots
+
+		for _, root := range roots {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			fixerCtx.SourceRoot = root
+			Log(LoggerInfo, "Processing source root: %s", root)
 
-			dirPath := filepath.Join(sourcePath, dir.Name())
-			var targetPath string = filepath.Join(outputPath, dir.Name())
-
-			isYearFolder, err := IsYearFolder(dir.Name())
+			dirs, err := DiscoverDirs(root)
 			if err != nil {
-				Log(LoggerWarn, "Failed to determine if folder is a year folder for %s: %v", dir.Name(), err)
-			}
-			if (options.IgnoreAlbums || options.Flatten) && !isYearFolder {
-				Log(LoggerInfo, "Skipping album folder: %s", dir.Name())
+				Log(LoggerError, "Error discovering directories in %s: %v", root, err)
 				continue
 			}
 
-			p = ProcessDirectory(fixerCtx, dirPath, targetPath, isYearFolder, p)
+			for _, dir := range dirs {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+
+				dirPath := filepath.Join(root, dir.Name())
+
+				isYearFolder, err := IsYearFolder(dir.Name())
+				if err != nil {
+					Log(LoggerWarn, "Failed to determine if folder is a year folder for %s: %v", dir.Name(), err)
+				}
+				if options.IgnoreAlbums && !isYearFolder {
+					Log(LoggerInfo, "Skipping album folder: %s", dir.Name())
+					continue
+				}
+
+				outputDirName := dir.Name()
+				if isYearFolder {
+					outputDirName = ExtractYearFromFolder(dir.Name())
+				}
+				targetPath := filepath.Join(outputPath, outputDirName)
+
+				p = ProcessDirectory(fixerCtx, dirPath, targetPath, isYearFolder, p)
+			}
 		}
 	} else {
 		err = ProcessFile(fixerCtx, sourcePath, "", false)
+		p.Processed++
+		p.Current = sourcePath
 		if err != nil {
+			p.Failed++
 			Log(LoggerError, "Error processing file: %v", err)
 		} else {
-			p.Processed++
-			p.Current = sourcePath
-			progressCh <- p
+			p.Succeeded++
 		}
+		progressCh <- p
 	}
 
 	return nil
 }
 
-// Process a directory and fix all files within the directory. Ignores sub-directories.
 func ProcessDirectory(
 	fixerCtx *FixerContext,
 	dirPath string,
@@ -177,45 +216,18 @@ func ProcessDirectory(
 	isYearFolder bool,
 	p Progress,
 ) Progress {
+	if fixerCtx.Ctx.Err() != nil {
+		return p
+	}
+
 	files, err := os.ReadDir(dirPath)
 	if err != nil {
 		Log(LoggerError, "Error reading directory: %v", err)
 		return p
 	}
 
-	// TODO: Fix potential race conditions
-	// Job pools
-	// Buffered channel to avoid blocking
-	jobs := make(chan string, len(files))
-	completed := make(chan string)
-	// Channel to capture errors
-	errors := make(chan error)
-
 	sourceDirName := filepath.Base(dirPath)
 
-	var wg sync.WaitGroup
-	workerCount := runtime.NumCPU() * 2 // x2 is faster for IO tasks, x more than that has no effect based on testing
-
-	// Start worker goroutines
-	for i := 0; i < workerCount; i++ {
-		go func() {
-			for imagePath := range jobs {
-				if fixerCtx.Ctx.Err() != nil {
-					wg.Done()
-					continue
-				}
-				err := ProcessFile(fixerCtx, imagePath, sourceDirName, isYearFolder)
-				if err != nil {
-					errors <- fmt.Errorf("error processing file %s: %w", imagePath, err)
-				} else {
-					completed <- imagePath
-				}
-				wg.Done()
-			}
-		}()
-	}
-
-	// Send jobs directly, add work group before transmitting job
 	for _, file := range files {
 		if fixerCtx.Ctx.Err() != nil {
 			break
@@ -226,49 +238,20 @@ func ProcessDirectory(
 
 		imagePath := filepath.Join(dirPath, file.Name())
 
-		// Check whether a file is a media file
 		if !IsMediaFile(imagePath) {
 			continue
 		}
 
-		wg.Add(1)
-		jobs <- imagePath
-	}
-
-	// All jobs have been sent
-	close(jobs)
-
-	// Close completed and errors channels when all jobs are finished
-	go func() {
-		wg.Wait()
-		close(completed)
-		close(errors)
-	}()
-
-	// Update progress and handle errors
-	for {
-		select {
-		case ev, ok := <-completed:
-			if !ok {
-				completed = nil
-			} else {
-				p.Processed++
-				p.Current = ev
-				fixerCtx.ProgressCh <- p
-			}
-		case err, ok := <-errors:
-			if !ok {
-				errors = nil
-			} else {
-				Log(LoggerError, "%v", err)
-			}
-		case <-fixerCtx.Ctx.Done():
-			// Let workers finish their current job but dont add new jobs
+		err := ProcessFile(fixerCtx, imagePath, sourceDirName, isYearFolder)
+		p.Processed++
+		p.Current = imagePath
+		if err != nil {
+			p.Failed++
+			Log(LoggerError, "Error processing file %s: %v", imagePath, err)
+		} else {
+			p.Succeeded++
 		}
-
-		if completed == nil && errors == nil {
-			break
-		}
+		fixerCtx.ProgressCh <- p
 	}
 
 	return p
@@ -282,6 +265,10 @@ func ProcessFile(
 	sourceDirName string,
 	isYearFolder bool,
 ) error {
+	if fixerCtx.Ctx.Err() != nil {
+		return fixerCtx.Ctx.Err()
+	}
+
 	fileName := filepath.Base(sourcePath)
 
 	// See issue #2
@@ -299,7 +286,7 @@ func ProcessFile(
 
 	//destPath := filepath.Join(outputPath, fileName)
 
-	sidecarPath, err := FindSidecar(sourcePath)
+	sidecarPath, err := FindSidecar(sourcePath, fixerCtx)
 
 	if err != nil {
 		Log(LoggerError, "Error finding sidecar for file %s: %v", sourcePath, err)
@@ -310,7 +297,7 @@ func ProcessFile(
 	if sidecarPath == "" && IsVideoFile(sourcePath) {
 		partnerImage, err := FindImagePartner(sourcePath)
 		if err == nil && partnerImage != "" {
-			partnerSidecar, err := FindSidecar(partnerImage)
+			partnerSidecar, err := FindSidecar(partnerImage, fixerCtx)
 			if err == nil && partnerSidecar != "" {
 				sidecarPath = partnerSidecar
 			}
@@ -322,27 +309,87 @@ func ProcessFile(
 		return err
 	}
 
-	destPath := filepath.Join(outputDir, fileName)
+	originalFileName := fileName
 
-	if _, err := os.Stat(destPath); err == nil {
-		Log(LoggerInfo, "File %s already exists, skipping", destPath)
-		return nil
-	}
-
-	// Metadata sidecar file not found, copy the file without metadata
-	if sidecarPath == "" {
-		Log(LoggerWarn, "No sidecar file found for %s — copying without metadata", sourcePath)
-		if err := CreateFixedFile(fixerCtx, sourcePath, "", destPath, isYearFolder); err != nil {
-			Log(LoggerError, "Error creating file without sidecar for %s: %v", sourcePath, err)
-			return err
+	if fixerCtx.Options.AppendDateToFilename {
+		if fileDate, err := DetectFileDate(sourcePath, sidecarPath); err == nil {
+			dateSuffix := fileDate.Format("2006-01-02")
+			if fileDate.Hour() != 0 || fileDate.Minute() != 0 || fileDate.Second() != 0 {
+				dateSuffix += fileDate.Format(" 15.04.05")
+			}
+			ext := filepath.Ext(fileName)
+			base := strings.TrimSuffix(fileName, ext)
+			if !strings.Contains(base, dateSuffix[:10]) {
+				fileName = base + " " + dateSuffix + ext
+			}
 		}
-		return nil
 	}
 
-	err = CreateFixedFile(fixerCtx, sourcePath, sidecarPath, destPath, isYearFolder)
-	if err != nil {
+	destPath := deduplicatePath(filepath.Join(outputDir, fileName))
+	hasSidecar := sidecarPath != ""
+
+	if !hasSidecar {
+		Log(LoggerWarn, "No sidecar file found for %s — copying without metadata", sourcePath)
+	}
+
+	if err := CreateFixedFile(fixerCtx, sourcePath, sidecarPath, destPath, isYearFolder); err != nil {
 		Log(LoggerError, "Error creating fixed file for %s: %v", sourcePath, err)
 		return err
+	}
+
+	if fixerCtx.Options.DeduplicateOutput {
+		newSize := int64(0)
+		if info, err := os.Stat(destPath); err == nil {
+			newSize = info.Size()
+		}
+
+		isDuplicate := false
+		if existing, found := FindDuplicateMatch(fixerCtx, originalFileName); found {
+			// Lazy-read EXIF only when a candidate match is found
+			if existing.DateOriginal == "" {
+				date, w, h, _ := ReadExifIdentity(existing.DestPath)
+				existing.DateOriginal = date
+				existing.ImageWidth = w
+				existing.ImageHeight = h
+				RegisterWrittenFile(fixerCtx, originalFileName, existing)
+			}
+
+			newDate, newW, newH, exifErr := ReadExifIdentity(destPath)
+			exifMatch := exifErr == nil && newDate != "" &&
+				newDate == existing.DateOriginal &&
+				newW == existing.ImageWidth &&
+				newH == existing.ImageHeight
+			sizeMatch := newSize == existing.FileSize
+
+			if exifMatch && sizeMatch {
+				isDuplicate = true
+				newIsBetter := false
+				if hasSidecar && !existing.HasSidecar {
+					newIsBetter = true
+				} else if hasSidecar == existing.HasSidecar && len(originalFileName) > existing.BaseNameLen {
+					newIsBetter = true
+				}
+
+				if newIsBetter {
+					Log(LoggerInfo, "Dedup: replacing %s with better copy %s", filepath.Base(existing.DestPath), filepath.Base(destPath))
+					if err := MoveToDuplicates(fixerCtx, existing.DestPath); err != nil {
+						Log(LoggerWarn, "Failed to move duplicate %s: %v", existing.DestPath, err)
+					}
+				} else {
+					Log(LoggerInfo, "Dedup: moving duplicate %s (keeping %s)", filepath.Base(destPath), filepath.Base(existing.DestPath))
+					if err := MoveToDuplicates(fixerCtx, destPath); err != nil {
+						Log(LoggerWarn, "Failed to move duplicate %s: %v", destPath, err)
+					}
+				}
+			}
+		}
+
+		if !isDuplicate {
+			RegisterWrittenFile(fixerCtx, originalFileName, WrittenFile{
+				DestPath: destPath, HasSidecar: hasSidecar,
+				FileSize: newSize, BaseNameLen: len(originalFileName),
+			})
+		}
 	}
 
 	return nil
@@ -371,9 +418,9 @@ func CreateFixedFile(
 	if fixerCtx.Options.UseSymlinks && !isYearFolder {
 		monthFolder := ""
 		if fixerCtx.Options.MonthSubfolders {
-			month, err := DetectFileMonth(filePath, fileMetadataPath)
+			fileDate, err := DetectFileDate(filePath, fileMetadataPath)
 			if err == nil {
-				monthFolder = strconv.Itoa(month)
+				monthFolder = strconv.Itoa(int(fileDate.Month()))
 			}
 		}
 
@@ -427,7 +474,19 @@ func CreateFixedFile(
 			}
 		}
 	} else if fixerCtx.Options.WriteMetadata && fileMetadataPath == "" {
-		Log(LoggerInfo, "WriteMetadata enabled but no sidecar for %s — skipping metadata write", fileName)
+		Log(LoggerInfo, "WriteMetadata enabled but no sidecar for %s — attempting EXIF/filename date", fileName)
+
+		if exifDate, err := ReadExifDate(filePath); err == nil {
+			Log(LoggerInfo, "Found EXIF date for %s: %s", fileName, exifDate.Format("2006-01-02 15:04:05"))
+			if err := SetFileBirthTime(destPath, exifDate); err != nil {
+				Log(LoggerWarn, "Failed to set birth time from EXIF for %s: %v", fileName, err)
+			}
+		} else if fileDate, ok := parseDateFromFileName(filepath.Base(filePath)); ok {
+			Log(LoggerInfo, "Using filename date for %s: %s", fileName, fileDate.Format("2006-01-02 15:04:05"))
+			if err := SetFileBirthTime(destPath, fileDate); err != nil {
+				Log(LoggerWarn, "Failed to set birth time from filename for %s: %v", fileName, err)
+			}
+		}
 	}
 
 	return nil

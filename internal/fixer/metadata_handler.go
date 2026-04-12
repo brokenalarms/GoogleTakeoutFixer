@@ -146,34 +146,18 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 	offsetStr := formatTimezoneOffset(offsetSec)
 
 	exifTime := localTime.Format("2006:01:02 15:04:05")
-	// exiftime with timezone
 	exifTimeWithTZ := exifTime + offsetStr
 
-	args := []string{
-		"-overwrite_original",
-		"-AllDates=" + exifTimeWithTZ,
-		"-TrackCreateDate=" + exifTimeWithTZ,
-		"-MediaCreateDate=" + exifTimeWithTZ,
-		"-OffsetTime=" + offsetStr,
-		"-OffsetTimeOriginal=" + offsetStr,
-		"-OffsetTimeDigitized=" + offsetStr,
-	}
-
-	// If a title exists, add it to args
+	// Common arguments for both images and videos
+	args := []string{"-overwrite_original"}
 	if meta.Title != "" {
 		args = append(args, "-Title="+meta.Title)
 	}
-
-	// If a description exists, add it to args
 	if meta.Description != "" {
 		args = append(args, "-ImageDescription="+meta.Description, "-Caption-Abstract="+meta.Description)
 	}
-
-	// If geodata exists, add it to args
-	// EXIF uses N E S W for geodata
 	if meta.GeoData.Latitude != 0 && meta.GeoData.Longitude != 0 {
 		lat, lon := meta.GeoData.Latitude, meta.GeoData.Longitude
-
 		latRef, lonRef := "N", "E"
 		if lat < 0 {
 			latRef = "S"
@@ -181,7 +165,6 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 		if lon < 0 {
 			lonRef = "W"
 		}
-
 		args = append(args,
 			fmt.Sprintf("-GPSLatitude=%f", math.Abs(lat)),
 			fmt.Sprintf("-GPSLatitudeRef=%s", latRef),
@@ -191,9 +174,26 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 		)
 	}
 
+	if IsVideoFile(filePath) {
+		args = append(args,
+			"-CreateDate="+exifTimeWithTZ,
+			"-ModifyDate="+exifTimeWithTZ,
+			"-TrackCreateDate="+exifTimeWithTZ,
+			"-MediaCreateDate="+exifTimeWithTZ,
+			"-FileCreateDate="+exifTimeWithTZ,
+			"-OffsetTimeOriginal="+offsetStr,
+		)
+	} else {
+		args = append(args,
+			"-AllDates="+exifTimeWithTZ,
+			"-FileCreateDate="+exifTimeWithTZ,
+			"-OffsetTime="+offsetStr,
+			"-OffsetTimeOriginal="+offsetStr,
+			"-OffsetTimeDigitized="+offsetStr,
+		)
+	}
 	args = append(args, filePath)
 
-	// Use the persistent exiftool instance
 	exifToolMutex.Lock()
 	defer exifToolMutex.Unlock()
 
@@ -262,6 +262,85 @@ func SetFileBirthTime(filePath string, t time.Time) error {
 		return fmt.Errorf("SetFile failed: %v, output: %s", err, string(output))
 	}
 	return nil
+}
+
+// ReadExifDate reads DateTimeOriginal from a file's existing EXIF data
+func ReadExifDate(filePath string) (time.Time, error) {
+	exifToolMutex.Lock()
+	defer exifToolMutex.Unlock()
+
+	if exifToolCmd == nil {
+		return time.Time{}, fmt.Errorf("exiftool not initialized")
+	}
+
+	if _, err := fmt.Fprintf(exifToolStdin, "-DateTimeOriginal\n-CreateDate\n-s3\n-charset\nfilename=utf8\n%s\n-execute\n", filePath); err != nil {
+		return time.Time{}, err
+	}
+
+	var dateStr string
+	for exifToolScanner.Scan() {
+		line := exifToolScanner.Text()
+		if line == "{ready}" {
+			break
+		}
+		if dateStr == "" && !strings.Contains(line, "Error") && strings.TrimSpace(line) != "" {
+			dateStr = strings.TrimSpace(line)
+		}
+	}
+
+	if err := exifToolScanner.Err(); err != nil {
+		return time.Time{}, err
+	}
+
+	if dateStr == "" {
+		return time.Time{}, fmt.Errorf("no EXIF date found")
+	}
+
+	for _, layout := range []string{
+		"2006:01:02 15:04:05",
+		"2006:01:02 15:04:05-07:00",
+		"2006:01:02 15:04:05+07:00",
+	} {
+		if t, err := time.Parse(layout, dateStr); err == nil {
+			return t, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("could not parse EXIF date: %s", dateStr)
+}
+
+// ReadExifIdentity reads DateTimeOriginal, ImageWidth, ImageHeight for dedup comparison
+func ReadExifIdentity(filePath string) (dateOriginal string, width string, height string, err error) {
+	exifToolMutex.Lock()
+	defer exifToolMutex.Unlock()
+
+	if exifToolCmd == nil {
+		return "", "", "", fmt.Errorf("exiftool not initialized")
+	}
+
+	if _, err := fmt.Fprintf(exifToolStdin, "-DateTimeOriginal\n-ImageWidth\n-ImageHeight\n-s3\n-charset\nfilename=utf8\n%s\n-execute\n", filePath); err != nil {
+		return "", "", "", err
+	}
+
+	var lines []string
+	for exifToolScanner.Scan() {
+		line := exifToolScanner.Text()
+		if line == "{ready}" {
+			break
+		}
+		if !strings.Contains(line, "Error") {
+			lines = append(lines, strings.TrimSpace(line))
+		}
+	}
+
+	if scanErr := exifToolScanner.Err(); scanErr != nil {
+		return "", "", "", scanErr
+	}
+
+	if len(lines) >= 3 {
+		return lines[0], lines[1], lines[2], nil
+	}
+	return "", "", "", fmt.Errorf("incomplete EXIF identity for %s", filepath.Base(filePath))
 }
 
 // GetMajorBrand reads the MajorBrand tag from a file using the persistent exiftool instance
