@@ -691,42 +691,8 @@ func ResolveOutputDir(
 ) (string, error) {
 	targetDir := fixerCtx.OutputRoot
 
-	if !fixerCtx.Options.Flatten {
-		if isYearFolder {
-			folderYear := ExtractYearFromFolder(sourceDirName)
-			fileName := filepath.Base(sourcePath)
-			fileNameDate, hasFileNameDate := parseDateFromFileName(fileName)
-
-			if fixerCtx.Options.PreferFilenameOverSidecar && hasFileNameDate {
-				detectedYear := strconv.Itoa(fileNameDate.Year())
-				if detectedYear != folderYear {
-					Log(LoggerInfo, "Re-sorting %s from %s to %s (filename timestamp preferred over sidecar)", fileName, folderYear, detectedYear)
-				}
-				targetDir = filepath.Join(targetDir, detectedYear)
-			} else {
-				fileDate, err := DetectFileDate(sourcePath, sidecarPath)
-				if err == nil {
-					detectedYear := strconv.Itoa(fileDate.Year())
-					if detectedYear != folderYear {
-						if hasFileNameDate {
-							Log(LoggerWarn, "File %s has filename date %d but sidecar/EXIF says %d (enable 'Prefer filename over sidecar' to use filename)", fileName, fileNameDate.Year(), fileDate.Year())
-						}
-					}
-					targetDir = filepath.Join(targetDir, detectedYear)
-				} else {
-					targetDir = filepath.Join(targetDir, folderYear)
-				}
-			}
-		} else if sourceDirName != "" {
-			targetDir = filepath.Join(targetDir, sourceDirName)
-		}
-	}
-
-	if !fixerCtx.Options.MonthSubfolders && !fixerCtx.Options.DateFolders {
-		return targetDir, nil
-	}
-
-	// Determine the best available date for folder organization
+	// Determine the best available date for folder organization early
+	// because we need it for the top-level folder when flattening.
 	var fileDate time.Time
 	var hasDate bool
 
@@ -745,16 +711,55 @@ func ResolveOutputDir(
 	}
 
 	if !hasDate {
-		// Ultimate fallback: use file system modification time
 		if info, err := os.Stat(sourcePath); err == nil {
 			fileDate = info.ModTime()
-		} else {
-			// If we can't even stat the file, just return what we have
-			return targetDir, nil
+			hasDate = true
 		}
 	}
 
-	// Now apply folder structure in order
+	if fixerCtx.Options.Flatten {
+		// When flattening, we still want a top-level Year folder if we have a date
+		if hasDate {
+			targetDir = filepath.Join(targetDir, strconv.Itoa(fileDate.Year()))
+		}
+	} else {
+		// Standard behavior: use the source folder name (Year or Album)
+		if isYearFolder {
+			folderYear := ExtractYearFromFolder(sourceDirName)
+			fileName := filepath.Base(sourcePath)
+			fileNameDate, hasFileNameDate := parseDateFromFileName(fileName)
+
+			if fixerCtx.Options.PreferFilenameOverSidecar && hasFileNameDate {
+				detectedYear := strconv.Itoa(fileNameDate.Year())
+				if detectedYear != folderYear {
+					Log(LoggerInfo, "Re-sorting %s from %s to %s (filename timestamp preferred over sidecar)", fileName, folderYear, detectedYear)
+				}
+				targetDir = filepath.Join(targetDir, detectedYear)
+			} else {
+				if hasDate {
+					detectedYear := strconv.Itoa(fileDate.Year())
+					if detectedYear != folderYear && hasFileNameDate {
+						Log(LoggerWarn, "File %s has filename date %d but sidecar/EXIF says %d (enable 'Prefer filename over sidecar' to use filename)", fileName, fileNameDate.Year(), fileDate.Year())
+					}
+					targetDir = filepath.Join(targetDir, detectedYear)
+				} else {
+					targetDir = filepath.Join(targetDir, folderYear)
+				}
+			}
+		} else if sourceDirName != "" {
+			targetDir = filepath.Join(targetDir, sourceDirName)
+		}
+	}
+
+	if !fixerCtx.Options.MonthSubfolders && !fixerCtx.Options.DateFolders {
+		return targetDir, nil
+	}
+
+	if !hasDate {
+		return targetDir, nil
+	}
+
+	// Now apply sub-folder structure in order
 	if fixerCtx.Options.MonthSubfolders {
 		targetDir = filepath.Join(targetDir, fileDate.Format("2006-01"))
 	}
