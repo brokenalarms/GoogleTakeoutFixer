@@ -185,10 +185,13 @@ func MoveToDuplicates(fixerCtx *FixerContext, filePath string) error {
 		return err
 	}
 
+	// Use deduplicatePath to ensure we don't overwrite existing duplicates
+	finalDupPath := deduplicatePath(dupPath)
+
 	// Retry mechanism for macOS Error -36
 	var lastErr error
 	for i := 0; i < 3; i++ {
-		if err := os.Rename(filePath, dupPath); err == nil {
+		if err := os.Rename(filePath, finalDupPath); err == nil {
 			return nil
 		} else {
 			lastErr = err
