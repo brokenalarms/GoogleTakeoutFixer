@@ -104,16 +104,24 @@ var imageExtensions = map[string]struct{}{
 	".tiff": {},
 	".tif":  {},
 	".bmp":  {},
+	".arw":  {}, // Sony RAW
+	".dng":  {}, // Adobe/iPhone RAW
+	".heif": {}, // High Efficiency Image Format
+	".mp":   {}, // Google Motion Photo
 }
 
 var videoExtensions = map[string]struct{}{
-	".mp4": {},
-	".mov": {},
-	".avi": {},
-	".mkv": {},
-	".m4v": {},
-	".3gp": {},
-	".wmv": {},
+	".mp4":  {},
+	".mov":  {},
+	".avi":  {},
+	".mkv":  {},
+	".m4v":  {},
+	".3gp":  {},
+	".wmv":  {},
+	".mts":  {}, // AVCHD Video
+	".m2ts": {}, // AVCHD Video
+	".mpg":  {}, // MPEG Video
+	".mpeg": {}, // MPEG Video
 }
 
 // Checks whether a file is a video file based on its extension

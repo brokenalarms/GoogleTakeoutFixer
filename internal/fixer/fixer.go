@@ -101,16 +101,17 @@ func Process(
 	}
 
 	Log(LoggerInfo, "Starting processing with source: %s and output: %s", sourcePath, outputPath)
+	Log(LoggerInfo, "Options: %+v", options)
 
-	// Log total processing time when processing is done
 	startTime := time.Now()
+	p := Progress{}
 	defer func() {
 		Log(LoggerInfo, "Total processing time: %s", time.Since(startTime).Round(time.Second))
+		Log(LoggerInfo, "Final progress: Total=%d Processed=%d Succeeded=%d Failed=%d", p.Total, p.Processed, p.Succeeded, p.Failed)
 		ClearCache()
 	}()
 
 	defer close(progressCh)
-	p := Progress{}
 
 	if ctx.Err() != nil {
 		return ctx.Err()
