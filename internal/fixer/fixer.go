@@ -124,7 +124,7 @@ func Process(
 		defer CloseExifTool()
 	}
 
-	amountImages, err := CountProcessableFiles(sourcePath)
+	amountImages, err := CountProcessableFiles(sourcePath, options)
 	if err != nil {
 		Log(LoggerError, "Error counting images: %v", err)
 		return err

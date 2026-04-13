@@ -160,8 +160,8 @@ func Main() {
 
 		setEnabled(useLinksCheckbox, !ignoreAlbums && !flatten)
 		setEnabled(ignoreAlbumsCheckbox, !useSymlinks && !flatten)
-		setEnabled(flattenCheckbox, !useSymlinks && !ignoreAlbums && !monthSubfolders)
-		setEnabled(monthSubfoldersCheckbox, !flatten)
+		setEnabled(flattenCheckbox, !useSymlinks && !ignoreAlbums)
+		setEnabled(monthSubfoldersCheckbox, true) // Always enabled, can be used with Flatten
 	}
 
 	// Set initial states for global vars based on defaults or previous logic

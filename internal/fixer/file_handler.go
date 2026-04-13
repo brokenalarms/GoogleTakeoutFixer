@@ -559,7 +559,7 @@ func dirHasMediaSubdirs(path string) bool {
 }
 
 // Counts all processable files across one or more source roots
-func CountProcessableFiles(sourcePath string) (int, error) {
+func CountProcessableFiles(sourcePath string, options ProcessOptions) (int, error) {
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		return 0, err
@@ -581,6 +581,11 @@ func CountProcessableFiles(sourcePath string) (int, error) {
 			continue
 		}
 		for _, dir := range subdirs {
+			isYearFolder, _ := IsYearFolder(dir.Name())
+			if options.IgnoreAlbums && !isYearFolder {
+				continue
+			}
+
 			files, _ := os.ReadDir(filepath.Join(root, dir.Name()))
 			for _, file := range files {
 				if !file.IsDir() && IsMediaFile(file.Name()) {
