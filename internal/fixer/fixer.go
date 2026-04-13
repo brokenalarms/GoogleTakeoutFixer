@@ -34,6 +34,7 @@ type Progress struct {
 	Processed int
 	Succeeded int
 	Failed    int
+	Skipped   []string
 	Current   string
 }
 
@@ -107,7 +108,14 @@ func Process(
 	p := Progress{}
 	defer func() {
 		Log(LoggerInfo, "Total processing time: %s", time.Since(startTime).Round(time.Second))
-		Log(LoggerInfo, "Final progress: Total=%d Processed=%d Succeeded=%d Failed=%d", p.Total, p.Processed, p.Succeeded, p.Failed)
+		Log(LoggerInfo, "Final progress: Total=%d Processed=%d Succeeded=%d Failed=%d Skipped=%d", p.Total, p.Processed, p.Succeeded, p.Failed, len(p.Skipped))
+		if len(p.Skipped) > 0 {
+			Log(LoggerInfo, "--- Skipped Files (%d) ---", len(p.Skipped))
+			for _, skipped := range p.Skipped {
+				Log(LoggerInfo, "Skipped: %s", skipped)
+			}
+			Log(LoggerInfo, "--------------------------")
+		}
 		ClearCache()
 	}()
 
@@ -183,6 +191,13 @@ func Process(
 				}
 				if options.IgnoreAlbums && !isYearFolder {
 					Log(LoggerInfo, "Skipping album folder: %s", dir.Name())
+					// Count files in skipped folder to keep Total accurate
+					subFiles, _ := os.ReadDir(dirPath)
+					for _, sf := range subFiles {
+						if !sf.IsDir() {
+							p.Skipped = append(p.Skipped, filepath.Join(dirPath, sf.Name()))
+						}
+					}
 					continue
 				}
 
@@ -268,6 +283,7 @@ func ProcessDirectory(
 		imagePath := filepath.Join(dirPath, file.Name())
 
 		if !IsMediaFile(imagePath) {
+			p.Skipped = append(p.Skipped, imagePath)
 			continue
 		}
 
