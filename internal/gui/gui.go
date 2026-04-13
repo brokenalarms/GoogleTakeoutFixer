@@ -28,6 +28,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/feloex/GoogleTakeoutFixer/internal/fixer"
@@ -42,7 +43,7 @@ func Main() {
 	a := app.New()
 	a.SetIcon(resourceGoogleTakeoutFixerPng)
 	w := a.NewWindow("GoogleTakeoutFixer " + version.Tag)
-	w.Resize(fyne.NewSize(550, 400))
+	w.Resize(fyne.NewSize(800, 400))
 
 	var useSymlinks bool = false
 	var writeMetadata bool = true
@@ -50,6 +51,13 @@ func Main() {
 	var ignoreAlbums bool = false
 	var monthSubfolders bool = false
 	var restoreMOVExtension bool = false
+<<<<<<< HEAD
+=======
+	var useFilenameTimestamp bool = true
+	var preferFilenameOverSidecar bool = false
+	var dateFolders bool = false
+	var appendDate bool = false
+>>>>>>> main
 	var dedup bool = false
 
 	progressLabel := widget.NewLabel("Ready to start")
@@ -96,9 +104,12 @@ func Main() {
 		fmt.Println("ignore albums", ignoreAlbums)
 	})
 
-	monthSubfoldersCheckbox := widget.NewCheck("Create month subfolders", func(value bool) {
+	dateFoldersCheckbox := widget.NewCheck("Day subfolders (YYYY-MM-DD)", func(value bool) {
+		dateFolders = value
+	})
+
+	monthSubfoldersCheckbox := widget.NewCheck("Create month subfolders (YYYY-MM)", func(value bool) {
 		monthSubfolders = value
-		fmt.Println("month subfolders", monthSubfolders)
 	})
 
 	flattenCheckbox := widget.NewCheck("Flatten album structure", func(value bool) {
@@ -111,10 +122,36 @@ func Main() {
 		fmt.Println("restore MOV extension", restoreMOVExtension)
 	})
 
+<<<<<<< HEAD
+=======
+	appendDateCheckbox := widget.NewCheck("Append date to filename", func(value bool) {
+		appendDate = value
+	})
+
+>>>>>>> main
 	dedupCheckbox := widget.NewCheck("Move duplicates to _duplicates", func(value bool) {
 		dedup = value
 	})
 
+<<<<<<< HEAD
+=======
+	preferFilenameOverSidecarCheckbox := widget.NewCheck("Prefer filename over sidecar when dates conflict", func(value bool) {
+		preferFilenameOverSidecar = value
+	})
+	preferFilenameOverSidecarCheckbox.Disable()
+
+	useFilenameTimestampCheckbox := widget.NewCheck("Use filename timestamp (YYYYMMDD / YYYY-MM-DD)", func(value bool) {
+		useFilenameTimestamp = value
+		if value {
+			preferFilenameOverSidecarCheckbox.Enable()
+		} else {
+			preferFilenameOverSidecar = false
+			preferFilenameOverSidecarCheckbox.SetChecked(false)
+			preferFilenameOverSidecarCheckbox.Disable()
+		}
+	})
+
+>>>>>>> main
 	// Fix conflicting options
 	updateCheckboxStates := func() {
 		setEnabled := func(cb *widget.Check, enabled bool) {
@@ -124,17 +161,41 @@ func Main() {
 				cb.Disable()
 			}
 		}
+
+		// Logic:
+		// 1. If Flatten is ON: monthSubfolders, useSymlinks, and ignoreAlbums are irrelevant/impossible.
+		// 2. If IgnoreAlbums is ON: useSymlinks is impossible.
+		// 3. useSymlinks and ignoreAlbums are mutually exclusive modes for album handling.
+
 		setEnabled(useLinksCheckbox, !ignoreAlbums && !flatten)
 		setEnabled(ignoreAlbumsCheckbox, !useSymlinks && !flatten)
 		setEnabled(flattenCheckbox, !useSymlinks && !ignoreAlbums && !monthSubfolders)
 		setEnabled(monthSubfoldersCheckbox, !flatten)
 	}
 
+	// Set initial states for global vars based on defaults or previous logic
+	useLinksCheckbox.SetChecked(useSymlinks)
+	writeMetadataCheckbox.SetChecked(writeMetadata)
+	ignoreAlbumsCheckbox.SetChecked(ignoreAlbums)
+	monthSubfoldersCheckbox.SetChecked(monthSubfolders)
+	flattenCheckbox.SetChecked(flatten)
+	restoreMOVExtensionCheckbox.SetChecked(restoreMOVExtension)
+	dateFoldersCheckbox.SetChecked(dateFolders)
+	appendDateCheckbox.SetChecked(appendDate)
+	dedupCheckbox.SetChecked(dedup)
+	useFilenameTimestampCheckbox.SetChecked(useFilenameTimestamp)
+	preferFilenameOverSidecarCheckbox.SetChecked(preferFilenameOverSidecar)
+
+	// Refresh states once at start
+	updateCheckboxStates()
+
 	for _, cb := range []*widget.Check{useLinksCheckbox, ignoreAlbumsCheckbox, flattenCheckbox, monthSubfoldersCheckbox} {
 		cb := cb
 		prev := cb.OnChanged
 		cb.OnChanged = func(v bool) {
-			prev(v)
+			if prev != nil {
+				prev(v)
+			}
 			updateCheckboxStates()
 		}
 	}
@@ -159,7 +220,15 @@ func Main() {
 		monthSubfoldersCheckbox.Disable()
 		flattenCheckbox.Disable()
 		restoreMOVExtensionCheckbox.Disable()
+<<<<<<< HEAD
 		dedupCheckbox.Disable()
+=======
+		dateFoldersCheckbox.Disable()
+		appendDateCheckbox.Disable()
+		dedupCheckbox.Disable()
+		useFilenameTimestampCheckbox.Disable()
+		preferFilenameOverSidecarCheckbox.Disable()
+>>>>>>> main
 
 		fixer.Log(fixer.LoggerInfo, "Processing...")
 		progressBar.SetValue(0)
@@ -177,7 +246,15 @@ func Main() {
 			IgnoreAlbums:        ignoreAlbums,
 			MonthSubfolders:     monthSubfolders,
 			RestoreMOVExtension: restoreMOVExtension,
+<<<<<<< HEAD
 			DeduplicateOutput:   dedup,
+=======
+			UseFilenameTimestamp:       useFilenameTimestamp,
+			PreferFilenameOverSidecar: preferFilenameOverSidecar,
+			DateFolders:               dateFolders,
+			AppendDateToFilename:     appendDate,
+			DeduplicateOutput:        dedup,
+>>>>>>> main
 		}
 		go func() {
 			if err := fixer.Process(ctx, inputPath, outputPath, progressCh, opts); err != nil {
@@ -230,8 +307,10 @@ func Main() {
 					fixer.Log(fixer.LoggerInfo, "Detailed logs are saved in the ./logs folder")
 					fixer.Log(fixer.LoggerInfo, "Done")
 
-					progressLabel.SetText(fmt.Sprintf("Finished processing %d files", lastP.Processed))
-					fixer.Log(fixer.LoggerInfo, "%s", fmt.Sprintf("Finished processing %d files", lastP.Processed))
+					fixer.Log(fixer.LoggerInfo, "Final progress: Total=%d Processed=%d Succeeded=%d Failed=%d", lastP.Total, lastP.Processed, lastP.Succeeded, lastP.Failed)
+					summary := fmt.Sprintf("Finished processing %d files (%d succeeded, %d failed)", lastP.Total, lastP.Succeeded, lastP.Failed)
+					progressLabel.SetText(summary)
+					fixer.Log(fixer.LoggerInfo, "%s", summary)
 				}
 				cancelButton.Disable()
 				cancelFn = nil
@@ -242,7 +321,15 @@ func Main() {
 				// Manually re-enable restoreMOVExtensionCheckbox and writeMetadataCheckbox
 				// since they are not affected by other checboxes in updateCheckboxStates
 				restoreMOVExtensionCheckbox.Enable()
+<<<<<<< HEAD
 				dedupCheckbox.Enable()
+=======
+				dateFoldersCheckbox.Enable()
+				appendDateCheckbox.Enable()
+				dedupCheckbox.Enable()
+				useFilenameTimestampCheckbox.Enable()
+				preferFilenameOverSidecarCheckbox.Enable()
+>>>>>>> main
 				writeMetadataCheckbox.Enable()
 				// Re-enable checboxes based on current states
 				updateCheckboxStates()
@@ -319,25 +406,40 @@ func Main() {
 		outputButton,
 	)
 
-	CheckBoxRow := container.NewGridWithColumns(
-		2,
+	leftColumn := container.NewVBox(
 		useLinksCheckbox,
-		writeMetadataCheckbox,
 		ignoreAlbumsCheckbox,
-		monthSubfoldersCheckbox,
 		flattenCheckbox,
+<<<<<<< HEAD
 		restoreMOVExtensionCheckbox,
 		dedupCheckbox,
+=======
+		useFilenameTimestampCheckbox,
+		container.NewPadded(preferFilenameOverSidecarCheckbox),
+		layout.NewSpacer(),
+>>>>>>> main
 	)
+
+	rightColumn := container.NewVBox(
+		writeMetadataCheckbox,
+		monthSubfoldersCheckbox,
+		dateFoldersCheckbox,
+		appendDateCheckbox,
+		restoreMOVExtensionCheckbox,
+		dedupCheckbox,
+		layout.NewSpacer(),
+	)
+
+	CheckBoxRow := container.NewGridWithColumns(2, leftColumn, rightColumn)
 
 	StartCancelRow := container.NewGridWithColumns(2, startButton, cancelButton)
 
-	FolderSeperator := container.NewPadded(widget.NewSeparator())
+	OutputSeparator := container.NewPadded(widget.NewSeparator())
 	OptionsSeparator := container.NewPadded(widget.NewSeparator())
 
 	topContent := container.NewVBox(
 		folderButtons,
-		FolderSeperator,
+		OutputSeparator,
 		CheckBoxRow,
 		OptionsSeparator,
 		StartCancelRow,
