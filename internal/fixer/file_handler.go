@@ -678,39 +678,37 @@ func ResolveOutputDir(
 	sourceDirName string,
 	isYearFolder bool,
 ) (string, error) {
-	if fixerCtx.Options.Flatten {
-		return fixerCtx.OutputRoot, nil
-	}
-
 	targetDir := fixerCtx.OutputRoot
 
-	if isYearFolder {
-		folderYear := ExtractYearFromFolder(sourceDirName)
-		fileName := filepath.Base(sourcePath)
-		fileNameDate, hasFileNameDate := parseDateFromFileName(fileName)
+	if !fixerCtx.Options.Flatten {
+		if isYearFolder {
+			folderYear := ExtractYearFromFolder(sourceDirName)
+			fileName := filepath.Base(sourcePath)
+			fileNameDate, hasFileNameDate := parseDateFromFileName(fileName)
 
-		if fixerCtx.Options.PreferFilenameOverSidecar && hasFileNameDate {
-			detectedYear := strconv.Itoa(fileNameDate.Year())
-			if detectedYear != folderYear {
-				Log(LoggerInfo, "Re-sorting %s from %s to %s (filename timestamp preferred over sidecar)", fileName, folderYear, detectedYear)
-			}
-			targetDir = filepath.Join(targetDir, detectedYear)
-		} else {
-			fileDate, err := DetectFileDate(sourcePath, sidecarPath)
-			if err == nil {
-				detectedYear := strconv.Itoa(fileDate.Year())
+			if fixerCtx.Options.PreferFilenameOverSidecar && hasFileNameDate {
+				detectedYear := strconv.Itoa(fileNameDate.Year())
 				if detectedYear != folderYear {
-					if hasFileNameDate {
-						Log(LoggerWarn, "File %s has filename date %d but sidecar/EXIF says %d (enable 'Prefer filename over sidecar' to use filename)", fileName, fileNameDate.Year(), fileDate.Year())
-					}
+					Log(LoggerInfo, "Re-sorting %s from %s to %s (filename timestamp preferred over sidecar)", fileName, folderYear, detectedYear)
 				}
 				targetDir = filepath.Join(targetDir, detectedYear)
 			} else {
-				targetDir = filepath.Join(targetDir, folderYear)
+				fileDate, err := DetectFileDate(sourcePath, sidecarPath)
+				if err == nil {
+					detectedYear := strconv.Itoa(fileDate.Year())
+					if detectedYear != folderYear {
+						if hasFileNameDate {
+							Log(LoggerWarn, "File %s has filename date %d but sidecar/EXIF says %d (enable 'Prefer filename over sidecar' to use filename)", fileName, fileNameDate.Year(), fileDate.Year())
+						}
+					}
+					targetDir = filepath.Join(targetDir, detectedYear)
+				} else {
+					targetDir = filepath.Join(targetDir, folderYear)
+				}
 			}
+		} else if sourceDirName != "" {
+			targetDir = filepath.Join(targetDir, sourceDirName)
 		}
-	} else if sourceDirName != "" {
-		targetDir = filepath.Join(targetDir, sourceDirName)
 	}
 
 	if !fixerCtx.Options.MonthSubfolders && !fixerCtx.Options.DateFolders {
