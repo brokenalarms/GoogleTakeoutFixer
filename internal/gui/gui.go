@@ -105,7 +105,7 @@ func Main() {
 		dateFolders = value
 	})
 
-	monthSubfoldersCheckbox := widget.NewCheck("Create month subfolders", func(value bool) {
+	monthSubfoldersCheckbox := widget.NewCheck("Create month subfolders (YYYY-MM)", func(value bool) {
 		monthSubfolders = value
 	})
 

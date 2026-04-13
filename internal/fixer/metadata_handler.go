@@ -87,19 +87,15 @@ func getExifToolPath() string {
 	return "exiftool"
 }
 
-// Start a persistent exiftool process
-func InitializeExifTool() error {
-	exifToolMutex.Lock()
-	defer exifToolMutex.Unlock()
-
+// Start a persistent exiftool process (internal version, assumes lock is held)
+func initializeExifToolInternal() error {
 	if exifToolCmd != nil {
-		// Already initialized
 		return nil
 	}
 
 	exifToolCmd = exec.Command(getExifToolPath(), "-stay_open", "True", "-@", "-")
 
-	var err error = nil
+	var err error
 	exifToolStdin, err = exifToolCmd.StdinPipe()
 	if err != nil {
 		return err
@@ -118,6 +114,13 @@ func InitializeExifTool() error {
 	return nil
 }
 
+// Start a persistent exiftool process
+func InitializeExifTool() error {
+	exifToolMutex.Lock()
+	defer exifToolMutex.Unlock()
+	return initializeExifToolInternal()
+}
+
 // Close the persistent exiftool process
 func CloseExifTool() {
 	exifToolMutex.Lock()
@@ -128,6 +131,118 @@ func CloseExifTool() {
 		exifToolCmd.Wait()
 		exifToolCmd = nil
 	}
+}
+
+// runExifTool executes a command on the persistent exiftool process with a timeout and restart logic.
+func runExifTool(args []string) ([]string, error) {
+	exifToolMutex.Lock()
+	defer exifToolMutex.Unlock()
+
+	// Ensure process is running
+	if exifToolCmd == nil {
+		if err := initializeExifToolInternal(); err != nil {
+			return nil, fmt.Errorf("failed to restart exiftool: %v", err)
+		}
+	}
+
+	command := strings.Join(args, "\n") + "\n-execute\n"
+	if _, err := exifToolStdin.Write([]byte(command)); err != nil {
+		exifToolCmd = nil
+		if err := initializeExifToolInternal(); err != nil {
+			return nil, fmt.Errorf("exiftool restart failed after write error: %v", err)
+		}
+		if _, err := exifToolStdin.Write([]byte(command)); err != nil {
+			return nil, fmt.Errorf("exiftool second write attempt failed: %v", err)
+		}
+	}
+
+	var lines []string
+	var exifErr error
+	done := make(chan bool, 1)
+	
+	// Track the current process to ensure the goroutine is tied to it
+	currentScanner := exifToolScanner
+
+	go func() {
+		for currentScanner.Scan() {
+			line := currentScanner.Text()
+			if line == "{ready}" {
+				done <- true
+				return
+			}
+			if strings.Contains(line, "Error") && exifErr == nil {
+				exifErr = fmt.Errorf("exiftool error: %s", line)
+			}
+			lines = append(lines, line)
+		}
+		done <- false
+	}()
+
+	// Heartbeat logic: only kicks in for slow files (> 5s)
+	startTime := time.Now()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	var targetFile string
+	lastSize := int64(-1)
+
+	for {
+		select {
+		case success := <-done:
+			if !success {
+				exifToolCmd = nil
+				return nil, fmt.Errorf("exiftool process closed unexpectedly")
+			}
+			return lines, exifErr
+		case <-ticker.C:
+			elapsed := time.Since(startTime).Round(time.Second)
+			
+			// Only on the first slow-down, identify what we are working on
+			if targetFile == "" {
+				for _, arg := range args {
+					if !strings.HasPrefix(arg, "-") && (strings.HasSuffix(strings.ToLower(arg), ".jpg") || strings.HasSuffix(strings.ToLower(arg), ".png") || strings.HasSuffix(strings.ToLower(arg), ".heic") || strings.HasSuffix(strings.ToLower(arg), ".mp4") || strings.HasSuffix(strings.ToLower(arg), ".mov")) {
+						targetFile = arg
+						break
+					}
+				}
+			}
+
+			// Empirical check: Is the temp file growing?
+			if targetFile != "" {
+				tempFile := targetFile + "_exiftool_tmp"
+				if info, err := os.Stat(tempFile); err == nil {
+					currentSize := info.Size()
+					if currentSize > lastSize {
+						Log(LoggerInfo, "Slow file detected: %s (Temp file growing: %s)", filepath.Base(targetFile), formatSize(currentSize))
+						lastSize = currentSize
+						continue 
+					}
+				}
+			}
+			
+			Log(LoggerInfo, "Still working... (exiftool active for %s)", elapsed)
+		case <-time.After(60 * time.Second):
+			if exifToolCmd != nil && exifToolCmd.Process != nil {
+				_ = exifToolCmd.Process.Kill()
+			}
+			exifToolCmd = nil
+			return nil, fmt.Errorf("exiftool timed out after 60s of no activity")
+		}
+	}
+}
+
+// Helper to format file sizes
+func formatSize(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 // Apply all available metadata to a file
@@ -181,12 +296,14 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 			"-TrackCreateDate="+exifTimeWithTZ,
 			"-MediaCreateDate="+exifTimeWithTZ,
 			"-FileCreateDate="+exifTimeWithTZ,
+			"-FileModifyDate="+exifTimeWithTZ,
 			"-OffsetTimeOriginal="+offsetStr,
 		)
 	} else {
 		args = append(args,
 			"-AllDates="+exifTimeWithTZ,
 			"-FileCreateDate="+exifTimeWithTZ,
+			"-FileModifyDate="+exifTimeWithTZ,
 			"-OffsetTime="+offsetStr,
 			"-OffsetTimeOriginal="+offsetStr,
 			"-OffsetTimeDigitized="+offsetStr,
@@ -194,35 +311,9 @@ func ApplyMetadata(filePath string, meta imageMetadata) error {
 	}
 	args = append(args, filePath)
 
-	exifToolMutex.Lock()
-	defer exifToolMutex.Unlock()
-
-	if exifToolCmd == nil {
-		return fmt.Errorf("Exiftool is not initialized")
-	}
-
-	command := strings.Join(args, "\n") + "\n-execute\n"
-	if _, err := exifToolStdin.Write([]byte(command)); err != nil {
-		return fmt.Errorf("Failed to write to exiftool: %v", err)
-	}
-
-	var exifErr error
-	for exifToolScanner.Scan() {
-		line := exifToolScanner.Text()
-		if line == "{ready}" {
-			break
-		}
-		if strings.Contains(line, "Error") && exifErr == nil {
-			exifErr = fmt.Errorf("Exiftool error: %s", line)
-		}
-	}
-
-	if exifErr != nil {
-		Log(LoggerWarn, "Exiftool can't write metadata to %s: %v", filepath.Base(filePath), exifErr)
-	}
-
-	if err := exifToolScanner.Err(); err != nil {
-		return fmt.Errorf("Failed to read from exiftool: %v", err)
+	_, err = runExifTool(args)
+	if err != nil {
+		Log(LoggerWarn, "Exiftool can't write metadata to %s: %v", filepath.Base(filePath), err)
 	}
 
 	// Set file birth time (creation date) using macOS SetFile
@@ -266,30 +357,18 @@ func SetFileBirthTime(filePath string, t time.Time) error {
 
 // ReadExifDate reads DateTimeOriginal from a file's existing EXIF data
 func ReadExifDate(filePath string) (time.Time, error) {
-	exifToolMutex.Lock()
-	defer exifToolMutex.Unlock()
-
-	if exifToolCmd == nil {
-		return time.Time{}, fmt.Errorf("exiftool not initialized")
-	}
-
-	if _, err := fmt.Fprintf(exifToolStdin, "-DateTimeOriginal\n-CreateDate\n-s3\n-charset\nfilename=utf8\n%s\n-execute\n", filePath); err != nil {
+	args := []string{"-DateTimeOriginal", "-CreateDate", "-s3", "-charset", "filename=utf8", filePath}
+	lines, err := runExifTool(args)
+	if err != nil {
 		return time.Time{}, err
 	}
 
 	var dateStr string
-	for exifToolScanner.Scan() {
-		line := exifToolScanner.Text()
-		if line == "{ready}" {
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			dateStr = strings.TrimSpace(line)
 			break
 		}
-		if dateStr == "" && !strings.Contains(line, "Error") && strings.TrimSpace(line) != "" {
-			dateStr = strings.TrimSpace(line)
-		}
-	}
-
-	if err := exifToolScanner.Err(); err != nil {
-		return time.Time{}, err
 	}
 
 	if dateStr == "" {
@@ -311,62 +390,32 @@ func ReadExifDate(filePath string) (time.Time, error) {
 
 // ReadExifIdentity reads DateTimeOriginal, ImageWidth, ImageHeight for dedup comparison
 func ReadExifIdentity(filePath string) (dateOriginal string, width string, height string, err error) {
-	exifToolMutex.Lock()
-	defer exifToolMutex.Unlock()
-
-	if exifToolCmd == nil {
-		return "", "", "", fmt.Errorf("exiftool not initialized")
-	}
-
-	if _, err := fmt.Fprintf(exifToolStdin, "-DateTimeOriginal\n-ImageWidth\n-ImageHeight\n-s3\n-charset\nfilename=utf8\n%s\n-execute\n", filePath); err != nil {
+	args := []string{"-DateTimeOriginal", "-ImageWidth", "-ImageHeight", "-s3", "-charset", "filename=utf8", filePath}
+	lines, err := runExifTool(args)
+	if err != nil {
 		return "", "", "", err
 	}
 
-	var lines []string
-	for exifToolScanner.Scan() {
-		line := exifToolScanner.Text()
-		if line == "{ready}" {
-			break
-		}
-		if !strings.Contains(line, "Error") {
-			lines = append(lines, strings.TrimSpace(line))
-		}
-	}
-
-	if scanErr := exifToolScanner.Err(); scanErr != nil {
-		return "", "", "", scanErr
-	}
-
 	if len(lines) >= 3 {
-		return lines[0], lines[1], lines[2], nil
+		return strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1]), strings.TrimSpace(lines[2]), nil
 	}
 	return "", "", "", fmt.Errorf("incomplete EXIF identity for %s", filepath.Base(filePath))
 }
 
 // GetMajorBrand reads the MajorBrand tag from a file using the persistent exiftool instance
 func GetMajorBrand(filePath string) (string, error) {
-	exifToolMutex.Lock()
-	defer exifToolMutex.Unlock()
-
-	if exifToolCmd == nil {
-		return "", fmt.Errorf("exiftool not initialized")
-	}
-
-	if _, err := fmt.Fprintf(exifToolStdin, "-MajorBrand\n-s3\n-charset\nfilename=utf8\n%s\n-execute\n", filePath); err != nil {
+	args := []string{"-MajorBrand", "-s3", "-charset", "filename=utf8", filePath}
+	lines, err := runExifTool(args)
+	if err != nil {
 		return "", err
 	}
 
-	var majorBrand string
-	for exifToolScanner.Scan() {
-		if line := exifToolScanner.Text(); line == "{ready}" {
-			break
-		} else if majorBrand == "" && !strings.Contains(line, "Error") {
-			majorBrand = line
-		}
+	if len(lines) > 0 {
+		return strings.TrimSpace(lines[0]), nil
 	}
-
-	return strings.TrimSpace(majorBrand), exifToolScanner.Err()
+	return "", fmt.Errorf("no MajorBrand found")
 }
+
 
 // Determine the timezone at a photo's GPS location using the "latlog" library
 // If no GPS data is available, fall back to local time

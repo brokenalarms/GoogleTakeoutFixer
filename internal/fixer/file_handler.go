@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -98,6 +99,11 @@ var imageExtensions = map[string]struct{}{
 	".jpeg": {},
 	".png":  {},
 	".heic": {},
+	".webp": {},
+	".gif":  {},
+	".tiff": {},
+	".tif":  {},
+	".bmp":  {},
 }
 
 var videoExtensions = map[string]struct{}{
@@ -105,6 +111,9 @@ var videoExtensions = map[string]struct{}{
 	".mov": {},
 	".avi": {},
 	".mkv": {},
+	".m4v": {},
+	".3gp": {},
+	".wmv": {},
 }
 
 // Checks whether a file is a video file based on its extension
@@ -167,7 +176,18 @@ func MoveToDuplicates(fixerCtx *FixerContext, filePath string) error {
 	if err := os.MkdirAll(dupDir, 0755); err != nil {
 		return err
 	}
-	return os.Rename(filePath, dupPath)
+
+	// Retry mechanism for macOS Error -36
+	var lastErr error
+	for i := 0; i < 3; i++ {
+		if err := os.Rename(filePath, dupPath); err == nil {
+			return nil
+		} else {
+			lastErr = err
+			time.Sleep(500 * time.Millisecond) // Wait for OS to release metadata locks
+		}
+	}
+	return fmt.Errorf("failed to move to duplicates after 3 attempts: %w", lastErr)
 }
 
 // Duplicate a file from one path to another
@@ -395,15 +415,12 @@ func FindSidecar(imagePath string, fixerCtx *FixerContext) (string, error) {
 	return "", nil
 }
 
-
 // Checks if the file at the given path has the specified extension
 func IsNameExtension(extension string, path string) bool {
 	return strings.EqualFold(filepath.Ext(path), extension)
 }
 
 // Year folder prefixes of some countries
-// yearPrefixes is mostly made by AI. I have not verified these, but i assume they are primarily correct.
-// Please create an issue if you find any mistakes or if you want to add more languages.
 var yearPrefixes = []string{
 	"Photos from ",     // English
 	"Fotos von ",       // German
@@ -461,8 +478,6 @@ func IsMediaFile(path string) bool {
 }
 
 // Attempts to find an image file with the same base name as the video file
-// This is used for live photos where the metadata is the images sidecar
-// I think error handling could be improved here
 func FindImagePartner(videoPath string) (string, error) {
 	if !IsVideoFile(videoPath) {
 		return "", nil
@@ -491,9 +506,7 @@ func FindImagePartner(videoPath string) (string, error) {
 }
 
 // FindSourceRoots returns directories that contain the expected Google Photos
-// folder structure (subdirectories with media files). If the given path already
-// has that structure, it returns just that path. Otherwise it looks one level
-// deeper to support pointing at a directory of multiple takeout exports.
+// folder structure (subdirectories with media files).
 func FindSourceRoots(path string) ([]string, error) {
 	if dirHasMediaSubdirs(path) {
 		return []string{path}, nil
@@ -603,6 +616,20 @@ func DetectFileDate(sourcePath string, sidecarPath string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("no date found for %s", filepath.Base(sourcePath))
 }
 
+// DetectFileMonth returns the month as 1-12
+func DetectFileMonth(sourcePath string, sidecarPath string) (int, error) {
+	t, err := DetectFileDate(sourcePath, sidecarPath)
+	if err == nil {
+		return int(t.Month()), nil
+	}
+	
+	fileInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return 0, err
+	}
+	return int(fileInfo.ModTime().Month()), nil
+}
+
 const dateSep = `[-:._]?`
 const dateTimeSep = `[-:._ ]?`
 
@@ -685,12 +712,12 @@ func ResolveOutputDir(
 		return targetDir, nil
 	}
 
+	// Determine the best available date for folder organization
 	var fileDate time.Time
 	var hasDate bool
 
 	if fixerCtx.Options.PreferFilenameOverSidecar {
-		fileName := filepath.Base(sourcePath)
-		if t, ok := parseDateFromFileName(fileName); ok {
+		if t, ok := parseDateFromFileName(filepath.Base(sourcePath)); ok {
 			fileDate = t
 			hasDate = true
 		}
@@ -704,9 +731,16 @@ func ResolveOutputDir(
 	}
 
 	if !hasDate {
-		return targetDir, nil
+		// Ultimate fallback: use file system modification time
+		if info, err := os.Stat(sourcePath); err == nil {
+			fileDate = info.ModTime()
+		} else {
+			// If we can't even stat the file, just return what we have
+			return targetDir, nil
+		}
 	}
 
+	// Now apply folder structure in order
 	if fixerCtx.Options.MonthSubfolders {
 		targetDir = filepath.Join(targetDir, fileDate.Format("2006-01"))
 	}

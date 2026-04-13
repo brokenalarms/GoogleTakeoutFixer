@@ -23,8 +23,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -63,12 +64,12 @@ type WrittenFile struct {
 }
 
 type FixerContext struct {
-	Ctx         context.Context
-	SourceRoot  string
-	AllRoots    []string
-	OutputRoot  string
-	Options     ProcessOptions
-	ProgressCh  chan<- Progress
+	Ctx          context.Context
+	SourceRoot   string
+	AllRoots     []string
+	OutputRoot   string
+	Options      ProcessOptions
+	ProgressCh   chan<- Progress
 	WrittenFiles map[string]WrittenFile
 }
 
@@ -209,6 +210,7 @@ func Process(
 	return nil
 }
 
+// Process a directory and fix all files within the directory. Ignores sub-directories.
 func ProcessDirectory(
 	fixerCtx *FixerContext,
 	dirPath string,
@@ -216,18 +218,44 @@ func ProcessDirectory(
 	isYearFolder bool,
 	p Progress,
 ) Progress {
-	if fixerCtx.Ctx.Err() != nil {
-		return p
-	}
-
 	files, err := os.ReadDir(dirPath)
 	if err != nil {
 		Log(LoggerError, "Error reading directory: %v", err)
 		return p
 	}
 
+	// Buffered channel to avoid blocking
+	jobs := make(chan string, len(files))
+	completed := make(chan string)
+	errors := make(chan error)
+
 	sourceDirName := filepath.Base(dirPath)
 
+	var wg sync.WaitGroup
+	// Use 1 worker for now to avoid any complex race conditions with the shared exiftool
+	// while we debug the freeze. We can scale this back up once stable.
+	workerCount := 1 
+
+	// Start worker goroutines
+	for i := 0; i < workerCount; i++ {
+		go func() {
+			for imagePath := range jobs {
+				if fixerCtx.Ctx.Err() != nil {
+					wg.Done()
+					continue
+				}
+				err := ProcessFile(fixerCtx, imagePath, sourceDirName, isYearFolder)
+				if err != nil {
+					errors <- fmt.Errorf("error processing file %s: %w", imagePath, err)
+				} else {
+					completed <- imagePath
+				}
+				wg.Done()
+			}
+		}()
+	}
+
+	// Send jobs
 	for _, file := range files {
 		if fixerCtx.Ctx.Err() != nil {
 			break
@@ -242,23 +270,51 @@ func ProcessDirectory(
 			continue
 		}
 
-		err := ProcessFile(fixerCtx, imagePath, sourceDirName, isYearFolder)
-		p.Processed++
-		p.Current = imagePath
-		if err != nil {
-			p.Failed++
-			Log(LoggerError, "Error processing file %s: %v", imagePath, err)
-		} else {
-			p.Succeeded++
+		wg.Add(1)
+		jobs <- imagePath
+	}
+
+	close(jobs)
+
+	go func() {
+		wg.Wait()
+		close(completed)
+		close(errors)
+	}()
+
+	// Update progress and handle outcomes
+	for {
+		select {
+		case ev, ok := <-completed:
+			if !ok {
+				completed = nil
+			} else {
+				p.Processed++
+				p.Succeeded++
+				p.Current = ev
+				fixerCtx.ProgressCh <- p
+			}
+		case err, ok := <-errors:
+			if !ok {
+				errors = nil
+			} else {
+				p.Processed++
+				p.Failed++
+				Log(LoggerError, "%v", err)
+				fixerCtx.ProgressCh <- p
+			}
+		case <-fixerCtx.Ctx.Done():
 		}
-		fixerCtx.ProgressCh <- p
+
+		if completed == nil && errors == nil {
+			break
+		}
 	}
 
 	return p
 }
 
 // ProcessFile processes a single file by finding its sidecar file and then fixing it using the sidecar's metadata
-// TODO: This function is written unorganized and should be refactored
 func ProcessFile(
 	fixerCtx *FixerContext,
 	sourcePath string,
@@ -284,16 +340,13 @@ func ProcessFile(
 		}
 	}
 
-	//destPath := filepath.Join(outputPath, fileName)
-
 	sidecarPath, err := FindSidecar(sourcePath, fixerCtx)
-
 	if err != nil {
 		Log(LoggerError, "Error finding sidecar for file %s: %v", sourcePath, err)
 		return err
 	}
 
-	// If no sidecar is found and its a video file, try to find a partner image and use it's sidecar
+	// If no sidecar is found and its a video file, try to find a partner image and use its sidecar
 	if sidecarPath == "" && IsVideoFile(sourcePath) {
 		partnerImage, err := FindImagePartner(sourcePath)
 		if err == nil && partnerImage != "" {
@@ -317,9 +370,13 @@ func ProcessFile(
 			if fileDate.Hour() != 0 || fileDate.Minute() != 0 || fileDate.Second() != 0 {
 				dateSuffix += fileDate.Format(" 15.04.05")
 			}
+			
 			ext := filepath.Ext(fileName)
 			base := strings.TrimSuffix(fileName, ext)
-			if !strings.Contains(base, dateSuffix[:10]) {
+			
+			// Robust check: don't append if the filename already contains this YYYY-MM-DD
+			datePattern := regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+			if !datePattern.MatchString(base) {
 				fileName = base + " " + dateSuffix + ext
 			}
 		}
@@ -420,7 +477,7 @@ func CreateFixedFile(
 		if fixerCtx.Options.MonthSubfolders {
 			fileDate, err := DetectFileDate(filePath, fileMetadataPath)
 			if err == nil {
-				monthFolder = strconv.Itoa(int(fileDate.Month()))
+				monthFolder = fileDate.Format("2006-01")
 			}
 		}
 
